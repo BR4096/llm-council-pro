@@ -1,0 +1,231 @@
+/* DebateGateway — glassmorphic accordion styling with violet/purple accent theme */
+
+/* Consensus message when all models agreed */
+.debate-consensus {
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 16px;
+  font-style: italic;
+}
+
+/* Outer wrapper for all accordions */
+.debate-gateway {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Accordion wrapper (header + body) */
+.debate-accordion {
+  margin-bottom: 4px;
+}
+
+/* --- Accordion Header --- */
+
+.debate-accordion-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  border-radius: 10px;
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 4px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.debate-accordion-header:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+/* Completed: green accent border */
+.debate-accordion-header.completed {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+/* Running: blue accent with subtle blue background */
+.debate-accordion-header.running {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* Failed or timed out: dim the header */
+.debate-accordion-header.failed,
+.debate-accordion-header.timeout {
+  opacity: 0.6;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* --- Arrow indicator (▶ / ▼ / ✓) --- */
+
+.debate-accordion-arrow {
+  font-size: 12px;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: color 0.2s ease;
+}
+
+.debate-accordion-header.completed .debate-accordion-arrow {
+  color: #22c55e;
+}
+
+/* --- Title --- */
+
+.debate-accordion-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+/* --- Verdict preview on collapsed completed header --- */
+
+.debate-verdict-preview {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* --- Status text for failed / timed-out --- */
+
+.debate-status-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+/* --- Progress dots (running state) --- */
+
+.debate-progress-dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+
+.debate-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: debate-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes debate-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.debate-phase-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 6px;
+  font-style: italic;
+}
+
+/* --- Accordion Body (expanded content) --- */
+
+.debate-accordion-body {
+  padding: 8px 16px 16px 42px;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- Debate turns --- */
+
+.debate-turn {
+  margin-bottom: 16px;
+}
+
+.debate-turn-speaker {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-stage4);
+  margin-bottom: 4px;
+}
+
+/* Block-quote style for turn text with purple left border */
+.debate-turn-text {
+  margin: 0;
+  padding: 10px 16px;
+  border-left: 3px solid rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.04);
+  border-radius: 0 8px 8px 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.debate-turn-text p {
+  margin: 0 0 8px 0;
+}
+
+.debate-turn-text p:last-child {
+  margin-bottom: 0;
+}
+
+/* --- Verdict section (highlighted purple box) --- */
+
+.debate-verdict-section {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  border-radius: 10px;
+}
+
+.debate-verdict-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #a855f7;
+  margin-bottom: 4px;
+}
+
+.debate-verdict-summary {
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+/* --- Empty / error message --- */
+
+.debate-empty-text {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+  padding: 8px 0;
+}
+
+/* Participant names highlighted in light blue — matches Stage2/Stage5 pattern */
+.model-name-highlight {
+  color: #7dd3fc;
+  font-weight: 600;
+}

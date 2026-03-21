@@ -1,0 +1,435 @@
+/* Stage4 Specific Styles - Violet Accent */
+
+.stage-4 .stage-subtitle {
+  color: var(--accent-stage4);
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0 0 16px 0;
+  opacity: 0.9;
+}
+
+/* Tab bar — horizontal pills matching Stage1/Stage2 pattern */
+.stage4-tab-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.stage4-tab-btn {
+  padding: 6px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.stage4-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(139, 92, 246, 0.4);
+  color: var(--text-primary);
+}
+
+.stage4-tab-btn.active {
+  border-color: var(--accent-stage4);
+  color: var(--text-primary);
+  background: rgba(15, 23, 42, 0.6);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+.stage4-tab-content {
+  padding: 24px;
+  border-radius: 16px;
+  min-height: 80px;
+}
+
+.stage4-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.stage4-section-label {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-stage4);
+}
+
+/* Verdict badges */
+.verdict-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  width: 100px;
+  text-align: center;
+}
+
+.verdict-confirmed {
+  color: var(--accent-stage3);
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.verdict-disputed {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.verdict-unverified {
+  color: var(--text-muted);
+  background: rgba(100, 116, 139, 0.1);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+.verdict-unaddressed {
+  color: var(--text-muted);
+  background: rgba(100, 116, 139, 0.1);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+/* Truth Check Table - Three column layout */
+.truth-check-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.truth-check-table thead {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.truth-check-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 8px 12px;
+}
+
+.truth-check-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: top;
+}
+
+.truth-check-table tr:last-child td {
+  border-bottom: none;
+}
+
+.truth-check-table .verdict-column {
+  width: 100px;
+  padding-left: 0;
+}
+
+.truth-check-table .claim-column {
+  width: auto;
+}
+
+.truth-check-table .reason-column {
+  width: 30%;
+}
+
+.truth-check-table .reason-column td {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* Claim rows */
+.claim-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.claim-row:last-child {
+  border-bottom: none;
+}
+
+.claim-text {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.claim-source {
+  font-size: 12px;
+  color: var(--accent-primary);
+  word-break: break-all;
+  text-decoration: none;
+  display: block;
+  margin-top: 4px;
+}
+
+.claim-source:hover {
+  text-decoration: underline;
+}
+
+/* Reset paragraph margins for markdown content in claim text */
+.claim-text p,
+.claim-reason p {
+  margin: 0;
+}
+
+/* Rankings */
+.ranking-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ranking-row:last-child {
+  border-bottom: none;
+}
+
+.rank-number {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent-stage4);
+  width: 28px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.rank-number.rank-1 {
+  color: var(--accent-chairman);
+}
+
+.ranking-model-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ranking-model-name.rank-1 {
+  color: var(--accent-chairman);
+}
+
+.ranking-dim {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  width: 100px;
+}
+
+.ranking-dim-label {
+  flex-shrink: 0;
+}
+
+.ranking-dim-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 24px;
+  text-align: right;
+}
+
+.ranking-total {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ranking-score-total {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent-stage4);
+  flex-shrink: 0;
+  width: 44px;
+  text-align: right;
+}
+
+.ranking-score-total.rank-1 {
+  color: var(--accent-chairman);
+}
+
+/* Highlights */
+.highlights-section {
+  margin-bottom: 36px;
+}
+
+.highlights-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+/* Agreements & Disagreements rows — icon left, content center, models right */
+.highlight-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.highlight-item-row:last-child {
+  border-bottom: none;
+}
+
+.highlight-check,
+.highlight-x {
+  flex-shrink: 0;
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+.highlight-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.highlight-text {
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+/* Reset paragraph margins for markdown content in highlights */
+.highlight-text p,
+.highlight-sub p {
+  margin: 0;
+}
+
+.highlight-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.highlight-models-right {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+  max-width: 200px;
+  line-height: 1.4;
+}
+
+/* Unique Insights — 3-column grid */
+.unique-insights-header {
+  display: grid;
+  grid-template-columns: 3.5fr 1.5fr 2fr;
+  gap: 16px;
+  padding: 0 0 8px 0;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 4px;
+}
+
+.unique-insights-header span {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.unique-insights-header span:nth-child(2) {
+  padding-left: 16px;
+}
+
+.unique-insight-row {
+  display: grid;
+  grid-template-columns: 3.5fr 1.5fr 2fr;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+  align-items: start;
+}
+
+.unique-insight-row:last-child {
+  border-bottom: none;
+}
+
+.unique-insight-finding {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-right: 20px;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.unique-insight-emoji {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Reset paragraph margins for inline markdown contexts */
+.inline-markdown p {
+  display: inline;
+  margin: 0;
+}
+
+.unique-insight-model {
+  font-size: 13px;
+  color: var(--accent-stage4);
+  font-weight: 500;
+  line-height: 1.4;
+  padding-left: 16px;
+}
+
+.unique-insight-why {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+/* Reset paragraph margins for markdown content in unique insights */
+.unique-insight-why p {
+  margin: 0;
+}
+
+
+/* Override tab active accent for stage-4 */
+.stage-4 .tab.active {
+  border-color: var(--accent-stage4);
+}
+
+.stage-4 .glass-panel {
+  border-color: rgba(139, 92, 246, 0.2);
+}
+
+/* Prevent paragraph margins in inline markdown contexts */
+.inline-markdown .markdown-content p {
+  display: inline;
+  margin: 0;
+}

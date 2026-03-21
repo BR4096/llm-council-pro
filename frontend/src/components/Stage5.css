@@ -1,0 +1,287 @@
+/* Stage 5 - Chairman's Verdict (Premium Gold Theme) */
+
+.stage5 {
+  background: transparent;
+}
+
+/* Chairman Character Name Subtitle - matches stage tab styling */
+.stage-5 .chairman-name-subtitle {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(234, 179, 8, 0.5);
+  color: white;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0 0 16px 0;
+}
+
+.final-response {
+  background: rgba(30, 41, 59, 0.4);
+  backdrop-filter: blur(12px);
+  padding: 24px;
+  border-radius: 16px;
+  border: 1px solid rgba(234, 179, 8, 0.2);
+}
+
+.chairman-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(234, 179, 8, 0.2);
+}
+
+.chairman-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.chairman-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  box-shadow: 0 4px 12px rgba(234, 179, 8, 0.3);
+}
+
+.chairman-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chairman-role {
+  color: var(--accent-chairman);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.chairman-model {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.final-text {
+  color: var(--text-primary);
+  line-height: 1.7;
+  font-size: 15px;
+  font-family: var(--font-content);
+}
+
+/* Premium Gold Theme */
+.final-response {
+  background: rgba(30, 41, 59, 0.4);
+  backdrop-filter: blur(12px);
+  padding: 24px;
+  border-radius: 16px;
+  border: 1px solid rgba(234, 179, 8, 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+
+.chairman-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(234, 179, 8, 0.2);
+}
+
+.chairman-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.chairman-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  box-shadow: 0 4px 12px rgba(234, 179, 8, 0.3);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.chairman-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chairman-character-name {
+  color: var(--accent-chairman);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.chairman-role {
+  color: var(--accent-chairman);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chairman-model {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--font-ui);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.chairman-provider-badge {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  align-self: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chairman-verdict-badge {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-chairman);
+  background: rgba(234, 179, 8, 0.1);
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+/* Chairman Character Name Badge - Inline with verdict */
+.chairman-character-name-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.1);
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  white-space: nowrap;
+}
+
+.final-text {
+  color: #e2e8f0;
+  line-height: 1.7;
+  font-size: 15px;
+  font-family: 'Merriweather', serif;
+}
+
+/* Citation Section */
+.citation-section {
+  margin-top: 16px;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  overflow: hidden;
+}
+
+.citation-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.citation-toggle:hover {
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--text-secondary);
+}
+
+.citation-icon {
+  font-size: 16px;
+}
+
+.citation-label {
+  flex: 1;
+  text-align: left;
+}
+
+.citation-chevron {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.citation-content {
+  padding: 12px 16px 16px 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.citation-list {
+  margin: 0;
+  padding: 0 0 0 20px;
+  list-style-type: decimal;
+}
+
+.citation-list li {
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+
+.citation-list a {
+  color: #60a5fa;
+  text-decoration: none;
+  word-break: break-all;
+  font-size: 14px;
+}
+
+.citation-list a:hover {
+  text-decoration: underline;
+  color: #93c5fd;
+}
+
+/* Model/character names highlighted in light blue */
+.model-name-highlight {
+    color: #7dd3fc;
+    font-weight: 600;
+}
+
+/* Debate count annotation in Stage 5 header */
+.stage5-debate-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 12px;
+}
