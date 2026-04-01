@@ -2,8 +2,9 @@
 
 **Domain**: `proxy.askbillringle.com`
 **Host**: InMotion VPS
-**Status**: Draft
+**Status**: Revised (post-check)
 **Date**: 2026-04-01
+**Revised**: 2026-04-01
 
 ## Objective
 
@@ -37,6 +38,110 @@ Browser                         InMotion VPS
 
 ---
 
+## Phase 0: Rate Limit Resilience & Token Tracking
+
+### Problem
+
+A full deliberation generates ~20+ API calls across 5 stages. The current direct providers (`providers/anthropic.py`, `providers/google.py`, `providers/openai.py`, `providers/perplexity.py`) have **no retry logic** for rate limits — only `openrouter.py` and `ollama_client.py` have retries. Additionally, the backend does not capture token usage from API responses, which blocks cost tracking in Phase 4B.
+
+### 0A: Add Retry Logic to Direct Providers
+
+Each direct provider's `query()` method must handle HTTP 429 with exponential backoff, matching the pattern already in `openrouter.py`:
+
+**Files to modify:**
+
+| File | Current State | Change |
+|------|--------------|--------|
+| `backend/providers/anthropic.py` | No retry | Add 3-retry loop with 1s/2s/4s backoff on 429 and 529 (overloaded) |
+| `backend/providers/openai.py` | No retry | Add 3-retry loop with 1s/2s/4s backoff on 429 |
+| `backend/providers/google.py` | No retry | Add 3-retry loop with 1s/2s/4s backoff on 429 and 503 |
+| `backend/providers/perplexity.py` | No retry | Add 3-retry loop with 1s/2s/4s backoff on 429 |
+
+**Retry pattern** (standardized across all providers):
+
+```python
+MAX_RETRIES = 3
+INITIAL_RETRY_DELAY = 1.0
+
+for attempt in range(MAX_RETRIES + 1):
+    try:
+        response = await client.post(...)
+        if response.status_code == 429:
+            if attempt < MAX_RETRIES:
+                delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+                logger.warning(f"Rate limited on {model_id}, retry in {delay}s ({attempt+1}/{MAX_RETRIES})")
+                await asyncio.sleep(delay)
+                continue
+            return {"response": None, "error": True, "error_message": "Rate limited after retries"}
+        # process successful response...
+    except httpx.ReadTimeout:
+        if attempt < MAX_RETRIES:
+            await asyncio.sleep(INITIAL_RETRY_DELAY * (2 ** attempt))
+            continue
+        return {"response": None, "error": True, "error_message": "Request timed out after retries"}
+```
+
+### 0B: Extract Token Usage from API Responses
+
+Each provider returns token counts in different formats. Normalize to a common shape and propagate through `council.py`.
+
+**Provider response formats:**
+
+| Provider | Token Field | Format |
+|----------|------------|--------|
+| Anthropic | `response.usage` | `{"input_tokens": N, "output_tokens": N}` |
+| OpenAI | `response.usage` | `{"prompt_tokens": N, "completion_tokens": N}` |
+| Google | `response.usage_metadata` | `{"prompt_token_count": N, "candidates_token_count": N}` |
+| Perplexity | `response.usage` | `{"prompt_tokens": N, "completion_tokens": N}` (OpenAI-compatible) |
+
+**Normalized shape** (returned from each provider's `query()` method):
+
+```python
+{
+    "response": "model text...",
+    "error": False,
+    "token_usage": {"input": 2400, "output": 1800}  # NEW FIELD
+}
+```
+
+**Propagation path:**
+
+1. Each provider's `query()` extracts token counts from API response → returns `token_usage`
+2. `council.py` `query_model()` passes `token_usage` through in its return dict
+3. `council.py` stage functions (`stage1_collect_responses`, etc.) collect per-model token usage
+4. `main.py` streaming handler accumulates token usage across stages → passes to `usage.py` for logging
+
+### 0C: Add Stage Timing to Backend
+
+The current backend emits SSE timing events but doesn't record them server-side. Add timing instrumentation to `main.py`'s streaming handler:
+
+```python
+stage_timers = {}
+
+# Before each stage:
+stage_timers["stage1_start"] = time.time()
+
+# After each stage:
+stage_timers["stage1_end"] = time.time()
+stage_timers["stage1_duration_ms"] = int((stage_timers["stage1_end"] - stage_timers["stage1_start"]) * 1000)
+```
+
+Pass `stage_timers` to usage tracking at deliberation completion.
+
+### 0D: Inter-Stage Delay for Rate Limit Protection
+
+Add a configurable delay between stages to prevent burst-firing 3 models simultaneously across 5 stages. Default: 500ms between stages. Configurable via `data/settings.json`:
+
+```json
+{
+  "inter_stage_delay_ms": 500
+}
+```
+
+This is especially important for Google (Gemini) which has lower per-minute limits than Anthropic/OpenAI.
+
+---
+
 ## Phase 1: Auth System (Password-Only, Invite-Only)
 
 ### Design
@@ -44,6 +149,8 @@ Browser                         InMotion VPS
 No usernames or emails — password-only access. Admin creates invite codes; users enter a code to get a session token. Simple, low-friction, appropriate for a small invited group.
 
 ### Data Model
+
+Invite codes are stored as plaintext dictionary keys. This is acceptable for a small invite-only system (< 50 users) where the `data/` directory is access-restricted on the server. The codes themselves are random 3-word phrases that are not guessable.
 
 **`data/users.json`**
 ```json
@@ -68,6 +175,8 @@ No usernames or emails — password-only access. Admin creates invite codes; use
   }
 }
 ```
+
+**File permissions**: `data/users.json` must be `600` (owner read/write only). The nginx config blocks `/data/*` from HTTP access.
 
 ### Backend Endpoints
 
@@ -97,6 +206,32 @@ No usernames or emails — password-only access. Admin creates invite codes; use
 - Expiry: 24 hours (invite-only users aren't daily users)
 - No refresh tokens — re-enter code after expiry
 - Role embedded in token: `admin` or `user`
+
+### Conversation Isolation
+
+Users must only see their own conversations. The current `GET /api/conversations` returns all conversations from the flat `data/conversations/` directory.
+
+**Implementation:**
+
+1. Add `created_by` field to conversation JSON (set from JWT `label` on creation):
+   ```json
+   {
+     "id": "uuid",
+     "created_by": "Client: Jane M.",
+     "created_at": "2026-04-01T12:00:00Z",
+     ...
+   }
+   ```
+
+2. Modify `storage.py` `list_conversations()` to accept `created_by` filter parameter
+
+3. Modify `backend/main.py` `GET /api/conversations` to extract `label` from JWT and pass as filter
+
+4. Admin role bypasses filter — sees all conversations
+
+5. Modify `GET /api/conversations/{id}` to verify the requesting user's label matches `created_by` (or user is admin)
+
+**No directory namespacing** — conversations stay in the flat `data/conversations/` directory. The filter is applied at query time. This avoids filesystem changes and keeps the backup strategy simple.
 
 ### Frontend Changes
 
@@ -158,15 +293,20 @@ Users don't configure models — they pick from 3 named council roles. Each role
 **Stage 1 Prompt Enhancement**:
 > Draw on evidence-based leadership research (not pop psychology). When recommending a practice, cite whether it's supported by organizational behavior research, anecdotal executive experience, or your own inference. Distinguish between advice for first-time managers vs. senior executives — the same question may have very different answers at different levels.
 
-### Backend Implementation
+### Backend Implementation — Extending the Existing Presets System
 
-**`data/council_roles.json`**
+The backend already has a full presets CRUD API (`GET/POST/PUT/DELETE /api/presets`) stored in `data/presets.json`. Rather than creating a parallel `council_roles.json`, roles are implemented as **locked presets** — presets with a `locked: true` flag that cannot be modified or deleted by regular users.
+
+**Extended preset schema** (add to existing preset structure):
+
 ```json
 {
-  "strategy": {
-    "name": "Strategy Council",
-    "description": "Business strategy, GTM, positioning",
-    "icon": "chess",
+  "name": "Strategy Council",
+  "locked": true,
+  "role_id": "strategy",
+  "description": "Business strategy, GTM, positioning",
+  "icon": "chess",
+  "config": {
     "council_models": ["anthropic:claude-sonnet-4-6", "openai:gpt-4o", "google:gemini-2.5-flash"],
     "chairman_model": "perplexity:sonar-pro",
     "character_names": {"0": "The Strategist", "1": "The Analyst", "2": "The Contrarian"},
@@ -177,19 +317,25 @@ Users don't configure models — they pick from 3 named council roles. Each role
     "council_temperature": 0.5,
     "chairman_temperature": 0.4,
     "execution_mode": "full"
-  },
-  "content": { ... },
-  "leadership": { ... }
+  }
 }
 ```
+
+**Changes to existing presets system:**
+
+| File | Change |
+|------|--------|
+| `backend/presets.py` | Add `locked` and `role_id` fields; reject user DELETE/PUT on locked presets |
+| `backend/main.py` | `GET /api/presets` returns all presets; frontend filters by `locked` for role display |
+
+**Why reuse presets**: Avoids a parallel storage system, reuses existing CRUD endpoints, and the admin preset import/export feature works for roles too.
 
 ### New Endpoints
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/roles` | User | List available council roles |
-| `GET` | `/api/roles/{role_id}` | User | Get role config (models redacted for users) |
-| `PUT` | `/api/admin/roles/{role_id}` | Admin | Update role config |
+| `GET` | `/api/roles` | User | List locked presets (redacts model IDs for user role) |
+| `PUT` | `/api/admin/roles/{role_id}` | Admin | Update a locked preset's config |
 
 ### Frontend Changes
 
@@ -198,7 +344,8 @@ Users don't configure models — they pick from 3 named council roles. Each role
 | New: `RoleSelector.jsx` | 3-card selector shown before first message or in sidebar |
 | `ChatInterface.jsx` | Pass selected role to `sendMessage`; display role badge in header |
 | `App.jsx` | Add `selectedRole` state; pass to ChatInterface |
-| Remove from user view | Settings panel model selection (admin-only now) |
+| `Settings.jsx` | Hide model config from user role; show admin panel for admin role |
+| Existing preset UI | Hidden from user view — users only see RoleSelector |
 
 ### Message Flow Change
 
@@ -206,10 +353,14 @@ Users don't configure models — they pick from 3 named council roles. Each role
 1. User selects a role (e.g., "Content Council")
 2. SPA sends role_id with message: POST /api/conversations/{id}/message/stream
    { content: "...", role_id: "content", web_search: false, ... }
-3. Backend loads role config from council_roles.json
-4. Backend applies role's models, prompts, temps to this deliberation
+3. Backend loads locked preset by role_id from presets.json
+4. Backend constructs a config dict from the preset and passes it to council.py
+   stage functions via parameters (NOT by mutating global settings — prevents
+   race conditions with concurrent users)
 5. Role is stored in conversation metadata for replay
 ```
+
+**Concurrency note**: `council.py` functions (`stage1_collect_responses`, `stage2_collect_rankings`, etc.) currently call `get_settings()` internally to read models and prompts. These must be refactored to accept a `config` parameter that overrides global settings. When `role_id` is present in the request, the streaming handler builds this config from the preset and passes it through. When no `role_id` is present (admin using raw settings), the existing `get_settings()` path is used unchanged.
 
 ---
 
@@ -396,7 +547,22 @@ Admin can change via API without redeploying:
 | Update prompts | `PUT /api/admin/roles/leadership` | Refines council behavior |
 | Create invite code | `POST /api/admin/invite` | Grant access to new user |
 | Revoke access | `DELETE /api/admin/invite/{code}` | Immediately invalidates sessions |
-| Toggle web search default | `PUT /api/admin/config` | Changes default for all users |
+| Global defaults | `PUT /api/admin/config` | Changes defaults for all users |
+
+**`PUT /api/admin/config` request model:**
+
+```json
+{
+  "web_search_default": true,
+  "debate_enabled_default": false,
+  "execution_mode_default": "full",
+  "inter_stage_delay_ms": 500,
+  "max_deliberations_per_hour": 10,
+  "truth_check_default": false
+}
+```
+
+All fields are optional — only provided fields are updated. These defaults are stored in `data/settings.json` under a new `admin_defaults` key and applied when a user starts a new conversation. Users can override per-conversation (except `max_deliberations_per_hour`, which is enforced server-side).
 
 ---
 
@@ -404,14 +570,23 @@ Admin can change via API without redeploying:
 
 | Priority | Phase | Effort | Depends On |
 |----------|-------|--------|------------|
-| P0 | Phase 1: Auth | 2 days | Nothing (blocks everything else) |
+| P0 | Phase 0: Rate Limit & Token Tracking | 1 day | Nothing (foundational infrastructure) |
+| P0 | Phase 1: Auth | 2 days | Nothing (blocks user-facing features) |
 | P0 | Phase 2: Council Roles | 1 day | Phase 1 (role stored per conversation) |
 | P1 | Phase 3: Satisfaction Rating | 1 day | Phase 1 (invite_label in rating) |
-| P1 | Phase 4A-B: Usage Tracking | 1 day | Phase 1 (user context in logs) |
+| P1 | Phase 4A-B: Usage Tracking | 1 day | Phase 0 (token data), Phase 1 (user context) |
 | P2 | Phase 4C-D: Dashboard & Monitoring | 2 days | Phase 4A-B (needs data to display) |
 | P2 | Phase 4E: Admin Config API | 1 day | Phase 2 (modifies role configs) |
 
-**Total estimated build**: 8 days
+**Total estimated build**: 9 days
+
+### Wave Schedule
+
+```
+Wave 1 (parallel): Phase 0 (Rate Limits) + Phase 1 (Auth)
+Wave 2 (parallel): Phase 2 (Roles) + Phase 3 (Ratings) + Phase 4A-B (Usage Tracking)
+Wave 3 (parallel): Phase 4C-D (Dashboard) + Phase 4E (Admin Config)
+```
 
 ---
 
@@ -421,6 +596,8 @@ Admin can change via API without redeploying:
 
 | File | Purpose |
 |------|---------|
+| `pyproject.toml` | Add `PyJWT>=2.8.0` dependency (JWT auth) |
+| `backend/retry.py` | Shared retry decorator/helper for direct providers (Phase 0) |
 | `backend/auth.py` | JWT creation, validation, invite code management |
 | `backend/middleware.py` | Auth middleware for all /api/* routes |
 | `backend/admin.py` | Admin endpoints (invites, roles, dashboard, usage) |
@@ -441,7 +618,11 @@ Admin can change via API without redeploying:
 |------|--------|
 | `backend/main.py` | Add auth middleware, role-based message flow, rating endpoint |
 | `backend/storage.py` | Add rating field to message schema, usage append |
-| `backend/council.py` | Accept role config override instead of global settings |
+| `backend/council.py` | Accept role config parameter; propagate token_usage from providers |
+| `backend/providers/anthropic.py` | Add retry logic, extract token_usage (Phase 0) |
+| `backend/providers/openai.py` | Add retry logic, extract token_usage (Phase 0) |
+| `backend/providers/google.py` | Add retry logic, extract token_usage (Phase 0) |
+| `backend/providers/perplexity.py` | Add retry logic, extract token_usage (Phase 0) |
 | `frontend/src/App.jsx` | Auth gate, role selection state, token management |
 | `frontend/src/api.js` | Add Authorization header, new endpoints |
 | `frontend/src/components/ChatInterface.jsx` | Role badge, rating callback |
@@ -454,21 +635,35 @@ Admin can change via API without redeploying:
 
 | Variable | Example | Description |
 |----------|---------|-------------|
-| `COUNCIL_JWT_SECRET` | `random-64-char-string` | JWT signing key |
-| `COUNCIL_ADMIN_CODE` | `alpine-fox-2026` | Bootstrap admin invite code |
-| `ANTHROPIC_API_KEY` | `sk-ant-...` | Anthropic API key |
-| `OPENAI_API_KEY` | `sk-...` | OpenAI API key |
-| `GOOGLE_API_KEY` | `AIza...` | Google AI API key |
-| `PERPLEXITY_API_KEY` | `pplx-...` | Perplexity API key |
+| `COUNCIL_JWT_SECRET` | `random-64-char-string` | JWT signing key (required) |
+| `COUNCIL_ADMIN_CODE` | `alpine-fox-2026` | Bootstrap admin invite code (required, first-run only) |
+
+### API Key Management
+
+LLM API keys remain in `data/settings.json` — the existing storage mechanism. They are **not** migrated to environment variables because:
+
+1. The backend already reads/writes keys via the Settings model and admin UI
+2. The admin can test and rotate keys via the Settings panel without SSH access
+3. Environment variables would require a service restart to update
+
+**Security**: `data/settings.json` permissions must be `600`. The nginx config blocks all `/data/*` paths from HTTP access. The admin UI for key management is protected by the auth system (admin role required to view Settings).
+
+**Bootstrap sequence** (first deployment):
+1. Set `COUNCIL_JWT_SECRET` and `COUNCIL_ADMIN_CODE` in systemd service env
+2. Start the backend — it creates `data/users.json` with the bootstrap admin code
+3. Admin logs in via the SPA, opens Settings, enters LLM API keys through the UI
+4. Keys persist in `data/settings.json` across restarts
 
 ---
 
 ## Security Considerations
 
-- Invite codes are hashed (bcrypt) in `users.json` — plaintext never stored
+- Invite codes are stored as plaintext in `users.json` — acceptable for a small invite-only system (< 50 users) where `data/` is filesystem-restricted. Codes are random 3-word phrases (e.g., `alpine-fox-2026`) that are not guessable. If the system scales beyond ~50 users, migrate to bcrypt-hashed codes with a list structure.
+- `data/users.json` and `data/settings.json` file permissions must be `600` (owner read/write only)
+- nginx config must block all `/data/*` paths from HTTP access
 - JWT secret must be 64+ characters, generated via `python -c "import secrets; print(secrets.token_hex(32))"`
-- API keys remain in `data/settings.json` — file permissions must be `600`
-- Rate limit: max 10 deliberations per invite code per hour (prevents abuse)
-- Admin role required for all `/api/admin/*` endpoints
+- Rate limit: max 10 deliberations per invite code per hour (enforced server-side, prevents abuse and runaway API costs)
+- Admin role required for all `/api/admin/*` endpoints — role is embedded in JWT and validated by middleware
 - No PII stored — invite labels are admin-assigned nicknames, not real names
-- JSONL files should be rotated monthly and archived
+- Conversations are isolated per invite code — users cannot access each other's deliberations
+- JSONL files (`usage.jsonl`, `errors.jsonl`, `ratings.jsonl`) should be rotated monthly and archived
