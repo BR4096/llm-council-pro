@@ -3,8 +3,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import StageTimer from './StageTimer';
 import DebateGateway from './DebateGateway';
+import CopyButton from './CopyButton';
 import { buildDisplayNames } from '../utils/modelHelpers';
 import './Stage4.css';
+import './CopyButton.css';
 
 // Tabs that appear progressively as sub-results arrive.
 // Each tab is included only when its data key is present in stage4Data.
@@ -147,6 +149,52 @@ export default function Stage4({
 
   const isLoading = stage4Status === 'loading';
 
+  // Build copyable markdown for the active Stage 4 sub-tab
+  function getStage4CopyContent() {
+    if (!stage4Data) return '';
+    if (effectiveTabId === 'truth') {
+      const claims = stage4Data.truth_check?.claims || [];
+      if (claims.length === 0) return '';
+      return claims.map(c => `**${c.verdict}**: ${c.text}\n> ${c.reason}${c.source_url ? `\n> Source: ${c.source_url}` : ''}`).join('\n\n');
+    }
+    if (effectiveTabId === 'highlights') {
+      const h = stage4Data.highlights;
+      if (!h) return '';
+      let md = '';
+      if (h.agreements?.length) {
+        md += '## Points of Agreement\n' + h.agreements.map(a => `- ${a.finding}`).join('\n') + '\n\n';
+      }
+      if (h.disagreements?.length) {
+        md += '## Points of Disagreement\n' + h.disagreements.map(d => `- ${d.topic || d.finding}${d.why_they_differ ? `: ${d.why_they_differ}` : ''}`).join('\n') + '\n\n';
+      }
+      if (h.unique_insights?.length) {
+        md += '## Unique Insights\n' + h.unique_insights.map(u => `- **${getDisplayName(u.model, labelToModel, characterNames, u.member_index, displayNames)}**: ${u.finding}${u.why_it_matters ? ` — ${u.why_it_matters}` : ''}`).join('\n');
+      }
+      return md.trim();
+    }
+    if (effectiveTabId === 'rankings') {
+      const rankings = stage4Data.rankings?.rankings || [];
+      const sorted = [...rankings].sort((a, b) => a.rank - b.rank);
+      return sorted.map(e => {
+        const name = getDisplayName(e.model, labelToModel, characterNames, e.member_index, displayNames);
+        const dims = ['reasoning', 'insight', 'clarity'].map(d => `${d}: ${e.dimensions?.[d]?.score != null ? Math.round(e.dimensions[d].score) : '--'}`).join(', ');
+        return `${e.rank}. **${name}** (${dims}, total: ${Math.round(e.normalized_score)})`;
+      }).join('\n');
+    }
+    if (effectiveTabId === 'debates') {
+      const debates = stage4Data.debates || [];
+      const issues = stage4Data.gateway_issues || [];
+      return issues.map((issue, i) => {
+        const debate = debates[i];
+        if (!debate?.transcript) return `## ${issue.title}\n(no transcript)`;
+        const transcript = debate.transcript.map(t => `**${t.name || t.model_id}**: ${t.text}`).join('\n\n');
+        const verdict = debate.verdict ? `\n\n**Verdict**: ${debate.verdict.summary}` : '';
+        return `## ${issue.title}\n\n${transcript}${verdict}`;
+      }).join('\n\n---\n\n');
+    }
+    return '';
+  }
+
   const allDebatesCompleted =
     Array.isArray(stage4Data?.gateway_issues) &&
     stage4Data.gateway_issues.length > 0 &&
@@ -202,6 +250,7 @@ export default function Stage4({
                   {effectiveTabId === 'rankings' ? "Chairman's Rankings" : effectiveTabId === 'highlights' ? "Council Highlights" : "Council Research"}
                 </span>
                 <span className="model-status success">Completed</span>
+                <CopyButton content={getStage4CopyContent()} />
               </div>
             )}
             {effectiveTabId === 'truth' && (
@@ -230,6 +279,7 @@ export default function Stage4({
               <div className="stage4-section-header">
                 <span className="stage4-section-label">Member Debates</span>
                 <span className="model-status success" style={{ visibility: allDebatesCompleted ? 'visible' : 'hidden' }}>Completed</span>
+                {allDebatesCompleted && <CopyButton content={getStage4CopyContent()} />}
               </div>
               <div style={{ padding: '8px 0' }}>
                 <DebateGateway

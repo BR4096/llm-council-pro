@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { getModelVisuals, getShortModelName, buildDisplayNames, stripFootnoteMarkers } from '../utils/modelHelpers';
 import ThinkBlockRenderer from './ThinkBlockRenderer';
+import CopyButton from './CopyButton';
 import StageTimer from './StageTimer';
 import './Stage3.css';
+import './CopyButton.css';
 
 export default function Stage3({ responses, startTime, endTime, characterNames = {}, councilModels = [] }) {
   const [activeResponse, setActiveResponse] = useState(null);
@@ -99,6 +101,7 @@ export default function Stage3({ responses, startTime, endTime, characterNames =
           ) : (
             <span className="model-status success">Completed</span>
           )}
+          {!hasError && <CopyButton content={currentResponse.response} />}
         </div>
 
         {hasError ? (

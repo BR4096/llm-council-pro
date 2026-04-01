@@ -42,6 +42,9 @@ app.add_middleware(
 async def backup_data():
     """Backup data directory on startup."""
     src = Path("data")
+    if not src.exists():
+        src.mkdir(parents=True, exist_ok=True)
+        return
     backup = Path("backups/latest")
     if backup.exists():
         shutil.rmtree(backup)

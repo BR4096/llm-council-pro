@@ -2,7 +2,9 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getModelVisuals, getShortModelName, buildDisplayNames } from '../utils/modelHelpers';
+import CopyButton from './CopyButton';
 import './Stage2.css';
+import './CopyButton.css';
 import StageTimer from './StageTimer';
 
 // Multi-language ranking section headers — used to strip the ranking list from displayed text.
@@ -184,6 +186,7 @@ export default function Stage2({ rankings, labelToModel, labelToInstanceKey, agg
                     ) : (
                         <span className="model-status success">Completed</span>
                     )}
+                    {!hasError && <CopyButton content={currentRanking?.ranking} />}
                 </div>
 
                 {hasError ? (

@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { getModelVisuals, getShortModelName, buildDisplayNames, getNameVariants, escapeRegex } from '../utils/modelHelpers';
 import ThinkBlockRenderer from './ThinkBlockRenderer';
+import CopyButton from './CopyButton';
 import StageTimer from './StageTimer';
 import './Stage5.css';
+import './CopyButton.css';
 
 /**
  * Convert a technical short model name to a human-readable display name.
@@ -260,6 +262,7 @@ export default function Stage5({
                         </div>
                     </div>
                     {!isFollowUp && <span className="chairman-verdict-badge">Chairman's Verdict</span>}
+                    <CopyButton content={rawContent} />
                 </div>
                 <div className="final-text markdown-content">
                     <ThinkBlockRenderer
