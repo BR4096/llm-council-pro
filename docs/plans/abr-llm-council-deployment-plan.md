@@ -604,7 +604,6 @@ Wave 3 (parallel): Phase 4C-D (Dashboard) + Phase 4E (Admin Config)
 | `backend/usage.py` | Usage tracking, JSONL append, aggregation queries |
 | `backend/ratings.py` | Rating storage, aggregation |
 | `data/users.json` | Invite codes and roles |
-| `data/council_roles.json` | 3 fixed role configurations |
 | `data/usage.jsonl` | Append-only usage log |
 | `data/errors.jsonl` | Append-only error log |
 | `data/ratings.jsonl` | Append-only ratings log |
