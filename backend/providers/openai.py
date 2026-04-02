@@ -1,9 +1,17 @@
 """OpenAI provider implementation."""
 
+import asyncio
+import logging
 import httpx
 from typing import List, Dict, Any
 from .base import LLMProvider
 from ..settings import get_settings
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+INITIAL_RETRY_DELAY = 1.0
+RETRYABLE_STATUS_CODES = (429,)
 
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider."""
@@ -22,33 +30,64 @@ class OpenAIProvider(LLMProvider):
         # Strip prefix if present
         model = model_id.removeprefix("openai:")
         
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    f"{self.BASE_URL}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": model,
-                        "messages": messages,
-                        "temperature": 1.0 if any(x in model for x in ["gpt-5.1", "o1-", "o3-"]) else temperature
-                    }
-                )
-                
-                if response.status_code != 200:
-                    return {
-                        "error": True, 
-                        "error_message": f"OpenAI API error: {response.status_code} - {response.text}"
-                    }
-                    
-                data = response.json()
-                content = data["choices"][0]["message"]["content"]
-                return {"content": content, "error": False}
-                
-        except Exception as e:
-            return {"error": True, "error_message": str(e)}
+        request_json = {
+            "model": model,
+            "messages": messages,
+            "temperature": 1.0 if any(x in model for x in ["gpt-5.1", "o1-", "o3-"]) else temperature
+        }
+
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(
+                        f"{self.BASE_URL}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json"
+                        },
+                        json=request_json
+                    )
+
+                    if response.status_code in RETRYABLE_STATUS_CODES:
+                        if attempt < MAX_RETRIES:
+                            delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+                            logger.warning(f"Rate limited on {model_id}, retry in {delay}s ({attempt+1}/{MAX_RETRIES})")
+                            await asyncio.sleep(delay)
+                            continue
+                        return {"error": True, "error_message": f"Rate limited after {MAX_RETRIES} retries", "token_usage": None}
+
+                    if response.status_code != 200:
+                        return {
+                            "error": True,
+                            "error_message": f"OpenAI API error: {response.status_code} - {response.text}",
+                            "token_usage": None
+                        }
+
+                    data = response.json()
+                    content = data["choices"][0]["message"]["content"]
+
+                    # Extract token usage
+                    token_usage = None
+                    usage = data.get("usage")
+                    if usage:
+                        token_usage = {
+                            "input": usage.get("prompt_tokens"),
+                            "output": usage.get("completion_tokens")
+                        }
+
+                    return {"content": content, "error": False, "token_usage": token_usage}
+
+            except httpx.ReadTimeout:
+                if attempt < MAX_RETRIES:
+                    delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+                    logger.warning(f"Timeout on {model_id}, retry in {delay}s ({attempt+1}/{MAX_RETRIES})")
+                    await asyncio.sleep(delay)
+                    continue
+                return {"error": True, "error_message": "Request timed out after retries", "token_usage": None}
+            except Exception as e:
+                return {"error": True, "error_message": str(e), "token_usage": None}
+
+        return {"error": True, "error_message": "Unexpected retry loop exit", "token_usage": None}
 
     async def get_models(self) -> List[Dict[str, Any]]:
         api_key = self._get_api_key()

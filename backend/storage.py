@@ -33,12 +33,13 @@ def get_conversation_path(conversation_id: str) -> str:
     return os.path.join(DATA_DIR, f"{validated_id}.json")
 
 
-def create_conversation(conversation_id: str) -> Dict[str, Any]:
+def create_conversation(conversation_id: str, created_by: Optional[str] = None) -> Dict[str, Any]:
     """
     Create a new conversation.
 
     Args:
         conversation_id: Unique identifier for the conversation
+        created_by: Label of the user who created this conversation
 
     Returns:
         New conversation dict
@@ -49,6 +50,7 @@ def create_conversation(conversation_id: str) -> Dict[str, Any]:
         "id": conversation_id,
         "created_at": datetime.utcnow().isoformat(),
         "title": "New Conversation",
+        "created_by": created_by,
         "messages": []
     }
 
@@ -93,9 +95,13 @@ def save_conversation(conversation: Dict[str, Any]):
         json.dump(conversation, f, indent=2)
 
 
-def list_conversations() -> List[Dict[str, Any]]:
+def list_conversations(created_by: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     List all conversations (metadata only).
+
+    Args:
+        created_by: If provided, only return conversations created by this user.
+                    If None, return all conversations.
 
     Returns:
         List of conversation metadata dicts
@@ -108,6 +114,9 @@ def list_conversations() -> List[Dict[str, Any]]:
             path = os.path.join(DATA_DIR, filename)
             with open(path, 'r') as f:
                 data = json.load(f)
+                # Filter by created_by if specified
+                if created_by is not None and data.get("created_by") != created_by:
+                    continue
                 # Return metadata only
                 conversations.append({
                     "id": data["id"],
@@ -231,6 +240,23 @@ def update_conversation_title(conversation_id: str, title: str):
         raise ValueError(f"Conversation {conversation_id} not found")
 
     conversation["title"] = title
+    save_conversation(conversation)
+
+
+def update_conversation_metadata(conversation_id: str, metadata: dict):
+    """
+    Update metadata fields on a conversation (e.g., role_id).
+
+    Args:
+        conversation_id: Conversation identifier
+        metadata: Dict of key-value pairs to merge into the conversation
+    """
+    conversation = get_conversation(conversation_id)
+    if conversation is None:
+        raise ValueError(f"Conversation {conversation_id} not found")
+
+    for key, value in metadata.items():
+        conversation[key] = value
     save_conversation(conversation)
 
 

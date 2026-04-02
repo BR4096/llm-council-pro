@@ -14,12 +14,103 @@ const getApiBase = () => {
 
 const API_BASE = getApiBase();
 
+// --- Auth token management ---
+let _authToken = null;
+
+/**
+ * Set the auth token for all subsequent API calls.
+ * Pass null to clear.
+ */
+export function setAuthToken(token) {
+  _authToken = token;
+}
+
+/**
+ * Get auth headers if a token is set.
+ */
+function authHeaders() {
+  if (!_authToken) return {};
+  return { Authorization: `Bearer ${_authToken}` };
+}
+
 export const api = {
+  // --- Auth endpoints ---
+
+  /**
+   * Login with an invite code.
+   */
+  async login(code) {
+    const response = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    if (!response.ok) {
+      throw new Error('Invalid access code');
+    }
+    return response.json();
+  },
+
+  /**
+   * Validate an existing JWT token.
+   */
+  async validate() {
+    const response = await fetch(`${API_BASE}/api/auth/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    });
+    if (!response.ok) {
+      throw new Error('Token invalid');
+    }
+    return response.json();
+  },
+
+  /**
+   * Create a new invite code (admin only).
+   */
+  async createInvite(label, role = 'user') {
+    const response = await fetch(`${API_BASE}/api/admin/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ label, role }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to create invite');
+    }
+    return response.json();
+  },
+
+  /**
+   * Revoke an invite code (admin only).
+   */
+  async revokeInvite(code) {
+    const response = await fetch(`${API_BASE}/api/admin/invite/${encodeURIComponent(code)}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to revoke invite');
+    }
+    return response.json();
+  },
+
+  /**
+   * List all invite codes with stats (admin only).
+   */
+  async listInvites() {
+    const response = await fetch(`${API_BASE}/api/admin/invites`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to list invites');
+    }
+    return response.json();
+  },
   /**
    * List all conversations.
    */
   async listConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations`);
+    const response = await fetch(`${API_BASE}/api/conversations`, { headers: authHeaders() });
     if (!response.ok) {
       throw new Error('Failed to list conversations');
     }
@@ -34,6 +125,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({}),
     });
@@ -48,7 +140,8 @@ export const api = {
    */
   async getConversation(conversationId) {
     const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`
+      `${API_BASE}/api/conversations/${conversationId}`,
+      { headers: authHeaders() }
     );
     if (!response.ok) {
       throw new Error('Failed to get conversation');
@@ -61,7 +154,8 @@ export const api = {
    */
   async getCouncilConfig(conversationId) {
     const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/council-config`
+      `${API_BASE}/api/conversations/${conversationId}/council-config`,
+      { headers: authHeaders() }
     );
     if (!response.ok) {
       throw new Error('Failed to get council config');
@@ -75,7 +169,7 @@ export const api = {
   async restoreCouncilConfig(conversationId) {
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/restore-config`,
-      { method: 'POST' }
+      { method: 'POST', headers: authHeaders() }
     );
     if (!response.ok) {
       throw new Error('Failed to restore council config');
@@ -89,7 +183,7 @@ export const api = {
   async deleteConversation(conversationId) {
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', headers: authHeaders() }
     );
     if (!response.ok) {
       throw new Error('Failed to delete conversation');
@@ -102,7 +196,8 @@ export const api = {
    */
   async deleteAllConversations() {
     const response = await fetch(`${API_BASE}/api/conversations`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: authHeaders(),
     });
     if (!response.ok) {
       throw new Error('Failed to delete all conversations');
@@ -118,6 +213,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({ conversation_ids: conversationIds }),
     });
@@ -131,7 +227,7 @@ export const api = {
    * Export all conversations as Markdown.
    */
   async exportAllConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations/export-all`);
+    const response = await fetch(`${API_BASE}/api/conversations/export-all`, { headers: authHeaders() });
     if (!response.ok) {
       throw new Error('Failed to export all conversations');
     }
@@ -148,6 +244,7 @@ export const api = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...authHeaders(),
         },
         body: JSON.stringify({ content, web_search: webSearch }),
       }
@@ -162,7 +259,7 @@ export const api = {
    * Get application settings.
    */
   async getSettings() {
-    const response = await fetch(`${API_BASE}/api/settings`);
+    const response = await fetch(`${API_BASE}/api/settings`, { headers: authHeaders() });
     if (!response.ok) {
       throw new Error('Failed to get settings');
     }
@@ -177,6 +274,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({ api_key: apiKey }),
     });
@@ -194,6 +292,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({ api_key: apiKey }),
     });
@@ -211,6 +310,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({ api_key: apiKey }),
     });
@@ -228,6 +328,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({ api_key: apiKey }),
     });
@@ -242,6 +343,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({ provider_id: providerId, api_key: apiKey }),
     });
@@ -259,6 +361,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({ base_url: baseUrl }),
     });
@@ -276,6 +379,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify({ name, url, api_key: apiKey }),
     });
@@ -289,7 +393,7 @@ export const api = {
    * Get available models from custom endpoint.
    */
   async getCustomEndpointModels() {
-    const response = await fetch(`${API_BASE}/api/custom-endpoint/models`);
+    const response = await fetch(`${API_BASE}/api/custom-endpoint/models`, { headers: authHeaders() });
     if (!response.ok) {
       throw new Error('Failed to get custom endpoint models');
     }
@@ -300,7 +404,7 @@ export const api = {
    * Get available models from OpenRouter.
    */
   async getModels() {
-    const response = await fetch(`${API_BASE}/api/models`);
+    const response = await fetch(`${API_BASE}/api/models`, { headers: authHeaders() });
     if (!response.ok) {
       throw new Error('Failed to get models');
     }
@@ -315,7 +419,7 @@ export const api = {
     if (baseUrl) {
       url += `?base_url=${encodeURIComponent(baseUrl)}`;
     }
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: authHeaders() });
     if (!response.ok) {
       throw new Error('Failed to get Ollama models');
     }
@@ -326,7 +430,7 @@ export const api = {
    * Get available models from direct providers.
    */
   async getDirectModels() {
-    const response = await fetch(`${API_BASE}/api/models/direct`);
+    const response = await fetch(`${API_BASE}/api/models/direct`, { headers: authHeaders() });
     if (!response.ok) {
       throw new Error('Failed to get direct models');
     }
@@ -337,7 +441,7 @@ export const api = {
    * Get default model settings.
    */
   async getDefaultSettings() {
-    const response = await fetch(`${API_BASE}/api/settings/defaults`);
+    const response = await fetch(`${API_BASE}/api/settings/defaults`, { headers: authHeaders() });
     if (!response.ok) {
       throw new Error('Failed to get default settings');
     }
@@ -352,6 +456,7 @@ export const api = {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
+        ...authHeaders(),
       },
       body: JSON.stringify(settings),
     });
@@ -367,7 +472,7 @@ export const api = {
   async resetCouncilConfig() {
     const response = await fetch(`${API_BASE}/api/settings/reset-council`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json', ...authHeaders() }
     });
     if (!response.ok) {
       throw new Error('Failed to reset council config');
@@ -387,7 +492,9 @@ export const api = {
    * @returns {Promise<void>}
    */
   async sendMessageStream(conversationId, options, onEvent, signal) {
-    const { content, webSearch = false, executionMode = 'full', truthCheck = false, debateEnabled = false } = options;
+    const { content, webSearch = false, executionMode = 'full', truthCheck = false, debateEnabled = false, roleId = null } = options;
+    const bodyPayload = { content, web_search: webSearch, execution_mode: executionMode, truth_check: truthCheck, debate_enabled: debateEnabled };
+    if (roleId) bodyPayload.role_id = roleId;
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/message/stream?_t=${Date.now()}`,
       {
@@ -395,8 +502,9 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache',
+          ...authHeaders(),
         },
-        body: JSON.stringify({ content, web_search: webSearch, execution_mode: executionMode, truth_check: truthCheck, debate_enabled: debateEnabled }),
+        body: JSON.stringify(bodyPayload),
         signal,
         cache: 'no-store',
       }
@@ -450,6 +558,7 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache',
+          ...authHeaders(),
         },
         body: JSON.stringify({ content }),
         signal,
@@ -493,11 +602,74 @@ export const api = {
     }
   },
 
+  // --- Rating endpoints ---
+
+  /**
+   * Submit a satisfaction rating for an assistant message.
+   */
+  async submitRating(conversationId, messageIndex, score, comment = null) {
+    const response = await fetch(
+      `${API_BASE}/api/conversations/${conversationId}/messages/${messageIndex}/rating`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ score, comment }),
+      }
+    );
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Failed to submit rating' }));
+      throw new Error(err.detail || 'Failed to submit rating');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get all ratings (admin only).
+   */
+  async getRatings(filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.role_id) params.set('role_id', filters.role_id);
+    if (filters.limit) params.set('limit', String(filters.limit));
+    const qs = params.toString();
+    const response = await fetch(
+      `${API_BASE}/api/admin/ratings${qs ? '?' + qs : ''}`,
+      { headers: authHeaders() }
+    );
+    if (!response.ok) {
+      throw new Error('Failed to get ratings');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get aggregated rating statistics (admin only).
+   */
+  async getRatingsSummary() {
+    const response = await fetch(`${API_BASE}/api/admin/ratings/summary`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to get ratings summary');
+    }
+    return response.json();
+  },
+
+  /**
+   * Get available council roles (locked presets).
+   */
+  async getRoles() {
+    const response = await fetch(`${API_BASE}/api/roles`, { headers: authHeaders() });
+    if (!response.ok) {
+      throw new Error('Failed to get roles');
+    }
+    return response.json();
+  },
+
   /**
    * List all presets.
    */
   async listPresets() {
-    const response = await fetch(`${API_BASE}/api/presets`);
+    const response = await fetch(`${API_BASE}/api/presets`, { headers: authHeaders() });
     if (!response.ok) {
       throw new Error('Failed to list presets');
     }
@@ -510,7 +682,7 @@ export const api = {
   async createPreset(name, config) {
     const response = await fetch(`${API_BASE}/api/presets`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ name, config }),
     });
     if (!response.ok) {
@@ -528,7 +700,7 @@ export const api = {
   async updatePreset(name, config) {
     const response = await fetch(`${API_BASE}/api/presets/${encodeURIComponent(name)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ name, config }),
     });
     if (!response.ok) {
@@ -543,6 +715,7 @@ export const api = {
   async deletePreset(name) {
     const response = await fetch(`${API_BASE}/api/presets/${encodeURIComponent(name)}`, {
       method: 'DELETE',
+      headers: authHeaders(),
     });
     if (!response.ok) {
       throw new Error('Failed to delete preset');
@@ -557,7 +730,7 @@ export const api = {
   async exportPresetsBatch(presetNames = null) {
     const response = await fetch(`${API_BASE}/api/presets/batch-export`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ preset_names: presetNames }),
     });
     if (!response.ok) throw new Error('Failed to export presets');
@@ -572,7 +745,7 @@ export const api = {
   async importPresetsBatch(presets, conflictMode = 'skip') {
     const response = await fetch(`${API_BASE}/api/presets/batch-import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ presets, conflict_mode: conflictMode }),
     });
     if (!response.ok) {
@@ -592,7 +765,7 @@ export const api = {
 export async function exportConversation(conversationId, format) {
   const response = await fetch(`${API_BASE}/api/conversations/${conversationId}/export`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ format })
   });
 

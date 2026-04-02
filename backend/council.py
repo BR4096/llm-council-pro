@@ -1,5 +1,6 @@
 """3-stage LLM Council orchestration."""
 
+from contextvars import ContextVar
 from typing import List, Dict, Any, Optional, Tuple
 import asyncio
 import logging
@@ -11,6 +12,45 @@ from .search import perform_web_search, SearchProvider
 from .settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Context variable for role-based settings override.
+# When set, get_effective_settings() returns a synthetic Settings object
+# built from the role preset config merged with base settings (for API keys etc.).
+_role_settings_override: ContextVar[Optional[Any]] = ContextVar('_role_settings_override', default=None)
+
+
+def set_role_settings_override(settings_obj):
+    """Set role-based settings override for the current async context."""
+    return _role_settings_override.set(settings_obj)
+
+
+def clear_role_settings_override(token):
+    """Clear role-based settings override."""
+    _role_settings_override.reset(token)
+
+
+def get_effective_settings():
+    """Get settings, using role override if set, otherwise global settings."""
+    override = _role_settings_override.get()
+    if override is not None:
+        return override
+    return get_settings()
+
+
+def get_effective_council_models():
+    """Get council models, using role override if set."""
+    override = _role_settings_override.get()
+    if override is not None:
+        return override.council_models or []
+    return get_council_models()
+
+
+def get_effective_chairman_model():
+    """Get chairman model, using role override if set."""
+    override = _role_settings_override.get()
+    if override is not None:
+        return override.chairman_model or ""
+    return get_chairman_model()
 
 NO_STAGE_DIRECTIONS = (
     "\n\nDo not use stage directions, actions, or physical gestures "
@@ -285,7 +325,7 @@ async def stage1_collect_responses(user_query: str, search_context: str = "", re
         - First yield: total_models (int)
         - Subsequent yields: Individual model results (dict)
     """
-    settings = get_settings()
+    settings = get_effective_settings()
 
     # Build search context block if search results provided
     search_context_block = ""
@@ -311,7 +351,7 @@ async def stage1_collect_responses(user_query: str, search_context: str = "", re
     messages = [{"role": "user", "content": prompt}]
 
     # Prepare tasks for all models
-    models = get_council_models()
+    models = get_effective_council_models()
 
     # Yield total count first
     yield len(models)
@@ -383,7 +423,8 @@ async def stage1_collect_responses(user_query: str, search_context: str = "", re
                                 "model": model,
                                 "member_index": idx,
                                 "response": content,
-                                "error": None
+                                "error": None,
+                                "token_usage": response.get("token_usage"),
                             }
 
                     if result:
@@ -414,7 +455,7 @@ async def stage2_collect_rankings(
         - First yield: label_to_model mapping (dict)
         - Subsequent yields: Individual model results (dict)
     """
-    settings = get_settings()
+    settings = get_effective_settings()
 
     # Filter to only successful responses for ranking
     successful_results = [r for r in stage1_results if not r.get('error')]
@@ -535,7 +576,8 @@ async def stage2_collect_rankings(
                                 "member_index": idx,
                                 "ranking": full_text,
                                 "parsed_ranking": parsed,
-                                "error": None
+                                "error": None,
+                                "token_usage": response.get("token_usage"),
                             }
 
                     if result:
@@ -687,7 +729,7 @@ async def stage5_synthesize_final(
     Returns:
         Dict with 'model' and 'response' keys
     """
-    settings = get_settings()
+    settings = get_effective_settings()
     character_names = settings.character_names or {}
     council_models = settings.council_models or []
 
@@ -903,7 +945,7 @@ async def stage5_synthesize_final(
                 break
 
     # Query the chairman model with error handling
-    chairman_model = get_chairman_model()
+    chairman_model = get_effective_chairman_model()
     chairman_temp = settings.chairman_temperature
 
     try:
@@ -1029,8 +1071,8 @@ async def chairman_follow_up(
     Returns:
         Dict with "model" and "response" keys
     """
-    settings = get_settings()
-    chairman_model = get_chairman_model()
+    settings = get_effective_settings()
+    chairman_model = get_effective_chairman_model()
     chairman_temp = settings.chairman_temperature
 
     history_block = ""
@@ -1333,7 +1375,7 @@ async def stage3_collect_revisions(
         - First yield: total_models (int)
         - Subsequent yields: Individual model results (dict)
     """
-    settings = get_settings()
+    settings = get_effective_settings()
 
     # Extract critiques keyed by instance_key (handles duplicate models correctly)
     model_critiques = extract_critiques_per_model(stage2_results, label_to_model, label_to_instance_key)
@@ -1433,7 +1475,8 @@ async def stage3_collect_revisions(
                                 "model": model,
                                 "member_index": idx,
                                 "response": content,
-                                "error": None
+                                "error": None,
+                                "token_usage": response.get("token_usage"),
                             }
 
                     if result:

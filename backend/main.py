@@ -12,18 +12,26 @@ import asyncio
 import time
 import shutil
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
 from . import storage
-from .council import generate_conversation_title, generate_search_query, stage1_collect_responses, stage2_collect_rankings, stage5_synthesize_final, calculate_aggregate_rankings, stage3_collect_revisions, PROVIDERS, chairman_follow_up
+from .auth import (
+    validate_invite_code, create_jwt, verify_jwt,
+    create_invite_code, revoke_invite_code, list_invite_codes, bootstrap_admin,
+)
+from .middleware import AuthMiddleware
+from .council import generate_conversation_title, generate_search_query, stage1_collect_responses, stage2_collect_rankings, stage5_synthesize_final, calculate_aggregate_rankings, stage3_collect_revisions, PROVIDERS, chairman_follow_up, set_role_settings_override, clear_role_settings_override
 from .search import perform_web_search, SearchProvider
 from .settings import get_settings, update_settings, Settings, DEFAULT_COUNCIL_MODELS, DEFAULT_CHAIRMAN_MODEL, AVAILABLE_MODELS, SYSTEM_DEFAULT_COUNCIL_CONFIG, save_settings
 from .models import CouncilConfig
-from .presets import get_presets, save_presets, get_preset, create_preset as create_preset_storage, update_preset as update_preset_storage, delete_preset as delete_preset_storage
+from .presets import get_presets, save_presets, get_preset, create_preset as create_preset_storage, update_preset as update_preset_storage, delete_preset as delete_preset_storage, get_preset_by_role_id, get_locked_presets, update_locked_preset
+from .ratings import save_rating, get_ratings, get_ratings_summary
 from .export import export_conversation, ExportFormat
 from .truth_check import stage4_truth_check
 from .rankings import stage4_chairman_rankings
 from .highlights import extract_highlights
 from .debate import select_debate_issues, run_debate
+from .usage import log_usage, log_error, get_usage, get_usage_by_role, get_usage_by_user, get_usage_by_model, get_errors, get_health_status
 
 app = FastAPI(title="LLM Council Plus API")
 
@@ -36,6 +44,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Auth middleware — must be added after CORS so CORS headers are always present
+app.add_middleware(AuthMiddleware)
 
 
 @app.on_event("startup")
@@ -51,6 +62,12 @@ async def backup_data():
     shutil.copytree(src, backup)
 
 
+@app.on_event("startup")
+async def init_auth():
+    """Bootstrap admin invite code if configured via env."""
+    bootstrap_admin()
+
+
 class CreateConversationRequest(BaseModel):
     """Request to create a new conversation."""
     pass
@@ -63,6 +80,7 @@ class SendMessageRequest(BaseModel):
     execution_mode: str = "full"  # 'chat_only', 'chat_ranking', 'revision', 'full'
     truth_check: bool = False  # Enable truth-check for this query
     debate_enabled: bool = False  # Enable debate gateway after Stage 4
+    role_id: Optional[str] = None  # If set, use locked preset config instead of global settings
 
 
 class ConversationMetadata(BaseModel):
@@ -78,6 +96,7 @@ class Conversation(BaseModel):
     id: str
     created_at: str
     title: str
+    created_by: Optional[str] = None
     messages: List[Dict[str, Any]]
     council_config: Optional[Dict[str, Any]] = None
 
@@ -109,23 +128,104 @@ class FollowUpRequest(BaseModel):
     content: str
 
 
+
+# --- Auth Pydantic Models ---
+
+class LoginRequest(BaseModel):
+    """Request to login with an invite code."""
+    code: str
+
+
+class CreateInviteRequest(BaseModel):
+    """Request to create a new invite code."""
+    label: str
+    role: str = "user"
+
+
+# --- Auth Endpoints ---
+
+@app.post("/api/auth/login")
+async def auth_login(request: LoginRequest):
+    """Login with an invite code. Returns JWT token."""
+    record = validate_invite_code(request.code)
+    if record is None:
+        raise HTTPException(status_code=401, detail="Invalid access code")
+    token = create_jwt(
+        role=record["role"],
+        label=record["label"],
+        code=request.code,
+    )
+    return {"token": token, "role": record["role"], "label": record["label"]}
+
+
+@app.post("/api/auth/validate")
+async def auth_validate(request: Request):
+    """Validate an existing JWT token. Returns user info."""
+    user = getattr(request.state, "user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"valid": True, "role": user["role"], "label": user["label"]}
+
+
+@app.post("/api/admin/invite")
+async def admin_create_invite(request: CreateInviteRequest):
+    """Create a new invite code (admin only)."""
+    code = create_invite_code(label=request.label, role=request.role)
+    return {"code": code}
+
+
+@app.delete("/api/admin/invite/{code}")
+async def admin_revoke_invite(code: str):
+    """Revoke an invite code (admin only)."""
+    success = revoke_invite_code(code)
+    if not success:
+        raise HTTPException(status_code=404, detail="Invite code not found")
+    return {"status": "revoked"}
+
+
+@app.get("/api/admin/invites")
+async def admin_list_invites():
+    """List all invite codes with usage stats (admin only)."""
+    return list_invite_codes()
+
+
 @app.get("/")
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
 
 
+def _get_user_label(request: Request) -> Optional[str]:
+    """Extract user label from request.state.user (set by AuthMiddleware)."""
+    user = getattr(request.state, "user", None)
+    if user is None:
+        return None
+    return user.get("label")
+
+
+def _is_admin(request: Request) -> bool:
+    """Check if current user is admin."""
+    user = getattr(request.state, "user", None)
+    if user is None:
+        return True  # No auth = local dev, treat as admin
+    return user.get("role") == "admin"
+
+
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
-async def list_conversations():
-    """List all conversations (metadata only)."""
-    return storage.list_conversations()
+async def list_conversations(request: Request):
+    """List all conversations (metadata only). Users see only their own; admins see all."""
+    if _is_admin(request):
+        return storage.list_conversations()
+    label = _get_user_label(request)
+    return storage.list_conversations(created_by=label)
 
 
 @app.post("/api/conversations", response_model=Conversation)
-async def create_conversation(request: CreateConversationRequest):
+async def create_conversation(request: Request, body: CreateConversationRequest):
     """Create a new conversation."""
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
+    label = _get_user_label(request)
+    conversation = storage.create_conversation(conversation_id, created_by=label)
     return conversation
 
 
@@ -232,11 +332,16 @@ async def export_all_conversations():
 
 # Dynamic routes come AFTER static routes
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation(conversation_id: str):
+async def get_conversation(conversation_id: str, request: Request):
     """Get a specific conversation with all its messages."""
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    # Ownership check: non-admin users can only see their own conversations
+    if not _is_admin(request):
+        label = _get_user_label(request)
+        if conversation.get("created_by") != label:
+            raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
 
 
@@ -307,8 +412,55 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
     # Check if this is the first message
     is_first_message = len(conversation["messages"]) == 0
 
+    # Extract user info for usage tracking (available before streaming starts)
+    _user = getattr(request.state, "user", None) or {}
+    _user_role_id = _user.get("role", "unknown")
+    _user_invite_label = _user.get("label", "unknown")
+
+    # Rate limit check: max_deliberations_per_hour
+    _admin_defaults = (get_settings().admin_defaults or {})
+    _max_per_hour = _admin_defaults.get("max_deliberations_per_hour", 10)
+    _hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    _recent_usage = get_usage(date_from=_hour_ago, invite_label=_user_invite_label, limit=_max_per_hour)
+    if len(_recent_usage) >= _max_per_hour:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded: maximum {_max_per_hour} deliberations per hour"
+        )
+
     async def event_generator():
+        role_override_token = None
         try:
+            # If a role_id is specified, build a settings override from the locked preset
+            if body.role_id:
+                role_preset = get_preset_by_role_id(body.role_id)
+                if role_preset is None:
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'Role not found: {body.role_id}'})}\n\n"
+                    return
+                role_config = role_preset["config"]
+                # Build a synthetic Settings object: start from global settings (for API keys),
+                # then overlay role-specific council config
+                base_settings = get_settings()
+                override_dict = base_settings.model_dump()
+                # Overlay role-specific fields
+                for key in [
+                    "council_models", "chairman_model", "character_names",
+                    "chairman_character_name", "member_prompts", "chairman_custom_prompt",
+                    "stage1_prompt", "council_temperature", "chairman_temperature",
+                    "stage2_temperature", "execution_mode",
+                ]:
+                    if key in role_config:
+                        override_dict[key] = role_config[key]
+                role_settings = Settings(**override_dict)
+                role_override_token = set_role_settings_override(role_settings)
+
+                # Override execution_mode from role if not explicitly set in request
+                if role_config.get("execution_mode"):
+                    body.execution_mode = role_config["execution_mode"]
+
+                # Store role_id in conversation metadata
+                storage.update_conversation_metadata(conversation_id, {"role_id": body.role_id})
+
             # Initialize variables for metadata
             stage1_results = []
             stage2_results = []
@@ -319,13 +471,15 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
             label_to_model = {}
             label_to_instance_key = {}
             aggregate_rankings = {}
-            
+
             # Add user message
             storage.add_user_message(conversation_id, body.content)
 
             # Capture council config snapshot on first message
             if is_first_message:
-                settings = get_settings()
+                # Use effective settings (respects role override)
+                from .council import get_effective_settings as _get_eff_settings
+                settings = _get_eff_settings()
                 config_snapshot = CouncilConfig(
                     council_models=settings.council_models,
                     chairman_model=settings.chairman_model,
@@ -398,22 +552,30 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
                 yield f"data: {json.dumps({'type': 'search_complete', 'data': {'search_query': search_query, 'extracted_query': extracted_query, 'search_context': search_context, 'provider': provider.value}})}\n\n"
                 await asyncio.sleep(0.05)
 
+            # Stage timing instrumentation
+            stage_timers = {}
+            settings_for_delay = get_settings()
+            inter_stage_delay_s = settings_for_delay.inter_stage_delay_ms / 1000.0
+
             # Stage 1: Collect responses
+            stage_timers["stage1_start"] = time.time()
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
             await asyncio.sleep(0.05)
-            
+
             total_models = 0
-            
+
             async for item in stage1_collect_responses(body.content, search_context, request):
                 if isinstance(item, int):
                     total_models = item
                     yield f"data: {json.dumps({'type': 'stage1_init', 'total': total_models})}\n\n"
                     continue
-                
+
                 stage1_results.append(item)
                 yield f"data: {json.dumps({'type': 'stage1_progress', 'data': item, 'count': len(stage1_results), 'total': total_models})}\n\n"
                 await asyncio.sleep(0.01)
 
+            stage_timers["stage1_end"] = time.time()
+            stage_timers["stage1_duration_ms"] = int((stage_timers["stage1_end"] - stage_timers["stage1_start"]) * 1000)
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
             await asyncio.sleep(0.05)
 
@@ -426,6 +588,10 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
 
             # Stage 2: Only if mode is 'chat_ranking', 'revision', or 'full'
             if body.execution_mode in ["chat_ranking", "revision", "full"]:
+                # Inter-stage delay
+                if inter_stage_delay_s > 0:
+                    await asyncio.sleep(inter_stage_delay_s)
+                stage_timers["stage2_start"] = time.time()
                 yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
                 await asyncio.sleep(0.05)
                 
@@ -448,12 +614,18 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
                     await asyncio.sleep(0.01)
 
                 aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model, label_to_instance_key)
+                stage_timers["stage2_end"] = time.time()
+                stage_timers["stage2_duration_ms"] = int((stage_timers["stage2_end"] - stage_timers["stage2_start"]) * 1000)
                 yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'label_to_instance_key': label_to_instance_key, 'aggregate_rankings': aggregate_rankings, 'search_query': search_query, 'search_context': search_context}})}\n\n"
                 await asyncio.sleep(0.05)
 
             # Stage 3 (Revisions): Only if mode is 'revision' or 'full'
             stage3_results = []
             if body.execution_mode in ["revision", "full"]:
+                # Inter-stage delay
+                if inter_stage_delay_s > 0:
+                    await asyncio.sleep(inter_stage_delay_s)
+                stage_timers["stage3_start"] = time.time()
                 yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
                 await asyncio.sleep(0.05)
 
@@ -476,6 +648,8 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
                     yield f"data: {json.dumps({'type': 'stage3_progress', 'data': item, 'count': len(stage3_results), 'total': stage3_total})}\n\n"
                     await asyncio.sleep(0.01)
 
+                stage_timers["stage3_end"] = time.time()
+                stage_timers["stage3_duration_ms"] = int((stage_timers["stage3_end"] - stage_timers["stage3_start"]) * 1000)
                 yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_results})}\n\n"
                 await asyncio.sleep(0.05)
 
@@ -487,6 +661,10 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
 
             # Emit stage4_start unconditionally when in full mode (not gated on truth_check)
             if body.execution_mode == "full":
+                # Inter-stage delay
+                if inter_stage_delay_s > 0:
+                    await asyncio.sleep(inter_stage_delay_s)
+                stage_timers["stage4_start"] = time.time()
                 yield f"data: {json.dumps({'type': 'stage4_start'})}\n\n"
                 await asyncio.sleep(0.05)
 
@@ -610,6 +788,8 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
                 await asyncio.sleep(0.01)
                 yield f"data: {json.dumps({'type': 'stage4_rankings_complete', 'data': stage4_rankings_result})}\n\n"
                 await asyncio.sleep(0.05)
+                stage_timers["stage4_end"] = time.time()
+                stage_timers["stage4_duration_ms"] = int((stage_timers["stage4_end"] - stage_timers["stage4_start"]) * 1000)
 
             # Debate Gateway: Issue selection (only if debate enabled in full mode)
             # NOTE: In this phase, gateway_ready is emitted and Stage 5 proceeds immediately
@@ -643,6 +823,7 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
             # Build metadata now (needed for early save below and/or final save)
             metadata = {
                 "execution_mode": body.execution_mode,
+                "stage_timers": {k: v for k, v in stage_timers.items() if k.endswith("_duration_ms")},
             }
             if body.execution_mode in ["chat_ranking", "revision", "full"]:
                 metadata["label_to_model"] = label_to_model
@@ -680,6 +861,10 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
             # When debate_early_saved=True, Stage 5 is triggered later via POST /api/conversations/{id}/stage5
             stage5_result = None
             if body.execution_mode == "full" and not debate_early_saved:
+                # Inter-stage delay
+                if inter_stage_delay_s > 0:
+                    await asyncio.sleep(inter_stage_delay_s)
+                stage_timers["stage5_start"] = time.time()
                 yield f"data: {json.dumps({'type': 'stage5_start'})}\n\n"
                 await asyncio.sleep(0.05)
 
@@ -701,6 +886,8 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
                     stage4_highlights=stage4_highlights_result,
                     debates=debate_results,
                 )
+                stage_timers["stage5_end"] = time.time()
+                stage_timers["stage5_duration_ms"] = int((stage_timers["stage5_end"] - stage_timers["stage5_start"]) * 1000)
                 yield f"data: {json.dumps({'type': 'stage5_complete', 'data': stage5_result})}\n\n"
 
             # Wait for title generation if it was started
@@ -736,6 +923,79 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
                     stage4=stage4_storage,
                 )
 
+            # --- Usage tracking ---
+            try:
+                # Collect token_usage from all stage results
+                all_token_usage: Dict[str, Dict[str, int]] = {}
+                for results_list in [stage1_results, stage2_results, stage3_results]:
+                    for r in results_list:
+                        tu = r.get("token_usage")
+                        model = r.get("model", "unknown")
+                        if tu:
+                            if model not in all_token_usage:
+                                all_token_usage[model] = {"input": 0, "output": 0}
+                            all_token_usage[model]["input"] += tu.get("input", 0) or 0
+                            all_token_usage[model]["output"] += tu.get("output", 0) or 0
+
+                # Collect errors from stage results
+                stage_errors = []
+                for stage_name, results_list in [("stage1", stage1_results), ("stage2", stage2_results), ("stage3", stage3_results)]:
+                    for r in results_list:
+                        if r.get("error"):
+                            err_record = {
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "model": r.get("model", "unknown"),
+                                "stage": stage_name,
+                                "error_type": "model_error",
+                                "error_message": r.get("error_message", "Unknown error"),
+                                "conversation_id": conversation_id,
+                                "role_id": _user_role_id,
+                            }
+                            stage_errors.append(err_record)
+                            log_error(err_record)
+
+                # Determine which stages completed
+                stages_completed = ["stage1"]
+                if stage2_results:
+                    stages_completed.append("stage2")
+                if stage3_results:
+                    stages_completed.append("stage3")
+                if stage4_result or stage4_rankings_result or stage4_highlights_result:
+                    stages_completed.append("stage4")
+                if stage5_result:
+                    stages_completed.append("stage5")
+
+                # Collect models used from council config
+                settings_snap = get_settings()
+                models_used = list(settings_snap.council_models) if settings_snap.council_models else []
+
+                # Build duration_ms from stage_timers
+                duration_ms = {k: v for k, v in stage_timers.items() if k.endswith("_duration_ms")}
+                total_ms = sum(duration_ms.values())
+                duration_ms["total"] = total_ms
+
+                message_index = len(conversation.get("messages", []))
+
+                usage_record = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "conversation_id": conversation_id,
+                    "message_index": message_index,
+                    "role_id": _user_role_id,
+                    "invite_label": _user_invite_label,
+                    "execution_mode": body.execution_mode,
+                    "web_search": body.web_search,
+                    "debate_enabled": body.debate_enabled,
+                    "models_used": models_used,
+                    "stages_completed": stages_completed,
+                    "duration_ms": duration_ms,
+                    "token_usage": all_token_usage,
+                    "errors": stage_errors,
+                    "rating": None,
+                }
+                log_usage(usage_record)
+            except Exception as usage_err:
+                print(f"[USAGE] Failed to log usage: {usage_err}")
+
             # Send completion event
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
 
@@ -757,6 +1017,10 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
             storage.add_error_message(conversation_id, f"Error: {str(e)}")
             # Send error event
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            # Clear role settings override if it was set
+            if role_override_token is not None:
+                clear_role_settings_override(role_override_token)
 
     return StreamingResponse(
         event_generator(),
@@ -1957,6 +2221,51 @@ async def restore_council_config(conversation_id: str):
     return {"restored": True, "council_config": config}
 
 
+# === Roles Endpoints ===
+
+@app.get("/api/roles")
+async def list_roles(request: Request):
+    """List all council roles (locked presets).
+    Non-admin users see redacted model IDs and prompts.
+    Admin users see full config.
+    """
+    locked = get_locked_presets()
+    user = getattr(request.state, "user", None)
+    is_admin = user and user.get("role") == "admin"
+
+    roles = []
+    for item in locked:
+        config = item["config"]
+        role_info = {
+            "role_id": config.get("role_id"),
+            "name": item["name"],
+            "description": config.get("description", ""),
+            "icon": config.get("icon", ""),
+            "character_names": config.get("character_names", {}),
+            "chairman_character_name": config.get("chairman_character_name", ""),
+        }
+        if is_admin:
+            # Admin sees full config
+            role_info["config"] = config
+        roles.append(role_info)
+
+    return roles
+
+
+class UpdateRoleRequest(BaseModel):
+    """Request to update a locked preset (role)."""
+    config: Dict[str, Any]
+
+
+@app.put("/api/admin/roles/{role_id}")
+async def admin_update_role(role_id: str, request: UpdateRoleRequest):
+    """Update a locked preset's config (admin only, enforced by middleware)."""
+    result = update_locked_preset(role_id, request.config)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Role '{role_id}' not found")
+    return {"status": "updated", "role_id": role_id}
+
+
 # === Preset Endpoints ===
 
 @app.get("/api/presets")
@@ -1981,8 +2290,11 @@ async def create_preset(request: CreatePresetRequest):
 
 @app.put("/api/presets/{preset_name}")
 async def update_preset_endpoint(preset_name: str, request: CreatePresetRequest):
-    """Update an existing preset."""
-    result = update_preset_storage(preset_name, request.config)
+    """Update an existing preset. Locked presets cannot be updated via this endpoint."""
+    try:
+        result = update_preset_storage(preset_name, request.config)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if result is None:
         raise HTTPException(status_code=404, detail="Preset not found")
     return {"name": preset_name, "config": request.config}
@@ -1990,8 +2302,11 @@ async def update_preset_endpoint(preset_name: str, request: CreatePresetRequest)
 
 @app.delete("/api/presets/{preset_name}")
 async def delete_preset_endpoint(preset_name: str):
-    """Delete a preset."""
-    deleted = delete_preset_storage(preset_name)
+    """Delete a preset. Locked presets cannot be deleted."""
+    try:
+        deleted = delete_preset_storage(preset_name)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if not deleted:
         raise HTTPException(status_code=404, detail="Preset not found")
     return {"status": "deleted", "name": preset_name}
@@ -2014,6 +2329,254 @@ async def batch_import_presets(request: BatchImportRequest):
             detail="conflict_mode must be 'skip', 'overwrite', or 'rename'"
         )
     return import_presets(request.presets, request.conflict_mode)
+
+
+class SubmitRatingRequest(BaseModel):
+    """Request to submit a rating for a message."""
+    score: int
+    comment: Optional[str] = None
+
+
+@app.post("/api/conversations/{conversation_id}/messages/{message_index}/rating")
+async def submit_rating(
+    conversation_id: str,
+    message_index: int,
+    body: SubmitRatingRequest,
+    request: Request,
+):
+    """Submit a satisfaction rating for an assistant message."""
+    # Validate score range
+    if body.score < 1 or body.score > 5:
+        raise HTTPException(status_code=400, detail="Score must be between 1 and 5")
+
+    # Load conversation and check ownership
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if not _is_admin(request):
+        label = _get_user_label(request)
+        if conversation.get("created_by") != label:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Check message exists and is not already rated
+    messages = conversation.get("messages", [])
+    if message_index < 0 or message_index >= len(messages):
+        raise HTTPException(status_code=400, detail="Invalid message index")
+
+    if messages[message_index].get("rating"):
+        raise HTTPException(status_code=409, detail="Message already rated")
+
+    # Extract role_id from user auth, invite_label from user label
+    user = getattr(request.state, "user", None)
+    role_id = user.get("role", "user") if user else "admin"
+    invite_label = user.get("label", "") if user else ""
+
+    try:
+        save_rating(
+            conversation_id=conversation_id,
+            message_index=message_index,
+            score=body.score,
+            comment=body.comment,
+            role_id=role_id,
+            invite_label=invite_label,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"success": True}
+
+
+@app.get("/api/admin/ratings")
+async def admin_get_ratings(
+    request: Request,
+    role_id: Optional[str] = None,
+    limit: int = 50,
+):
+    """Get all ratings (admin only)."""
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    ratings = get_ratings(role_id=role_id, limit=limit)
+    return ratings
+
+
+@app.get("/api/admin/ratings/summary")
+async def admin_get_ratings_summary(request: Request):
+    """Get aggregated rating statistics (admin only)."""
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return get_ratings_summary()
+
+
+# --- Admin Usage Endpoints ---
+
+@app.get("/api/admin/usage")
+async def admin_get_usage(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    role_id: Optional[str] = None,
+    limit: int = 100,
+):
+    """Query usage records with optional filters (admin only)."""
+    return get_usage(date_from=date_from, date_to=date_to, role_id=role_id, limit=limit)
+
+
+@app.get("/api/admin/usage/by-role")
+async def admin_usage_by_role():
+    """Aggregate usage counts and avg duration by role (admin only)."""
+    return get_usage_by_role()
+
+
+@app.get("/api/admin/usage/by-user")
+async def admin_usage_by_user():
+    """Aggregate usage counts by user (admin only)."""
+    return get_usage_by_user()
+
+
+@app.get("/api/admin/usage/by-model")
+async def admin_usage_by_model():
+    """Aggregate token usage and error counts by model (admin only)."""
+    return get_usage_by_model()
+
+
+@app.get("/api/admin/health")
+async def admin_health():
+    """Provider health status based on recent errors and successes (admin only)."""
+    return get_health_status()
+
+
+@app.get("/api/admin/errors")
+async def admin_get_errors(limit: int = 50):
+    """Return recent errors (admin only)."""
+    return get_errors(limit=limit)
+
+
+@app.get("/api/admin/dashboard")
+async def admin_dashboard():
+    """Aggregated dashboard overview for admin (admin only).
+
+    Combines data from usage tracking, ratings, conversations, and provider health
+    into a single response for the admin dashboard UI.
+    """
+    # --- Overview ---
+    # Count conversation files
+    conversations_dir = Path("data/conversations")
+    total_conversations = 0
+    if conversations_dir.exists():
+        total_conversations = len(list(conversations_dir.glob("*.json")))
+
+    # Usage records (all time) — use large limit to read all records
+    all_usage = get_usage(limit=999999)
+    total_deliberations = len(all_usage)
+
+    # Active users in last 7 days
+    cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    active_labels = set()
+    for r in all_usage:
+        if r.get("timestamp", "") >= cutoff_7d:
+            label = r.get("invite_label")
+            if label:
+                active_labels.add(label)
+    active_users_7d = len(active_labels)
+
+    # Ratings summary
+    ratings_summary = get_ratings_summary()
+    avg_rating = ratings_summary.get("avg_score", 0.0)
+    total_ratings = ratings_summary.get("count", 0)
+
+    # --- Usage 24h ---
+    cutoff_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    deliberations_24h = 0
+    total_duration_24h = 0
+    for r in all_usage:
+        if r.get("timestamp", "") >= cutoff_24h:
+            deliberations_24h += 1
+            duration = r.get("duration_ms", {})
+            if isinstance(duration, dict):
+                total_duration_24h += duration.get("total", 0)
+            elif isinstance(duration, (int, float)):
+                total_duration_24h += duration
+
+    errors_24h = 0
+    all_errors = get_errors(limit=999999)
+    for e in all_errors:
+        if e.get("timestamp", "") >= cutoff_24h:
+            errors_24h += 1
+
+    avg_duration_ms = round(total_duration_24h / deliberations_24h) if deliberations_24h else 0
+
+    # --- Provider Health ---
+    health = get_health_status()
+    provider_health = health.get("providers", {})
+
+    # --- Top Roles ---
+    by_role = ratings_summary.get("by_role", {})
+    # Also get usage counts per role
+    usage_by_role = get_usage_by_role()
+    role_usage_map = {r["role_id"]: r["count"] for r in usage_by_role}
+    top_roles = []
+    for role_id, stats in by_role.items():
+        top_roles.append({
+            "role_id": role_id,
+            "count": role_usage_map.get(role_id, 0),
+            "avg_rating": stats.get("avg", 0.0),
+        })
+    top_roles.sort(key=lambda x: x["count"], reverse=True)
+
+    return {
+        "overview": {
+            "total_conversations": total_conversations,
+            "total_deliberations": total_deliberations,
+            "active_users_7d": active_users_7d,
+            "avg_rating": avg_rating,
+            "total_ratings": total_ratings,
+        },
+        "usage_24h": {
+            "deliberations": deliberations_24h,
+            "errors": errors_24h,
+            "avg_duration_ms": avg_duration_ms,
+        },
+        "provider_health": provider_health,
+        "top_roles": top_roles,
+    }
+
+
+@app.get("/api/admin/config")
+async def admin_get_config():
+    """Return current admin defaults (admin only)."""
+    settings = get_settings()
+    return {"admin_defaults": settings.admin_defaults or {}}
+
+
+class AdminConfigUpdate(BaseModel):
+    """Request body for PUT /api/admin/config."""
+    web_search_default: Optional[bool] = None
+    debate_enabled_default: Optional[bool] = None
+    execution_mode_default: Optional[str] = None
+    inter_stage_delay_ms: Optional[int] = None
+    max_deliberations_per_hour: Optional[int] = None
+    truth_check_default: Optional[bool] = None
+
+
+@app.put("/api/admin/config")
+async def admin_update_config(body: AdminConfigUpdate):
+    """Update admin defaults (admin only).
+
+    Merges provided fields into settings.admin_defaults dict and saves.
+    """
+    settings = get_settings()
+    current_defaults = settings.admin_defaults or {}
+
+    # Merge only provided (non-None) fields
+    update_data = body.model_dump(exclude_none=True)
+    current_defaults.update(update_data)
+
+    settings.admin_defaults = current_defaults
+    save_settings(settings)
+
+    return {"admin_defaults": current_defaults}
 
 
 if __name__ == "__main__":

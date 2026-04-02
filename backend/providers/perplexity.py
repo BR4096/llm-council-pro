@@ -1,9 +1,17 @@
 """Perplexity provider implementation."""
 
+import asyncio
+import logging
 import httpx
 from typing import List, Dict, Any
 from .base import LLMProvider
 from ..settings import get_settings
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+INITIAL_RETRY_DELAY = 1.0
+RETRYABLE_STATUS_CODES = (429,)
 
 class PerplexityProvider(LLMProvider):
     """Perplexity API provider with citation extraction."""
@@ -22,44 +30,73 @@ class PerplexityProvider(LLMProvider):
         # Strip prefix if present
         model = model_id.removeprefix("perplexity:")
 
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    f"{self.BASE_URL}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": model,
-                        "messages": messages,
-                        "temperature": temperature
-                    }
-                )
+        request_json = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature
+        }
 
-                if response.status_code != 200:
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(
+                        f"{self.BASE_URL}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json"
+                        },
+                        json=request_json
+                    )
+
+                    if response.status_code in RETRYABLE_STATUS_CODES:
+                        if attempt < MAX_RETRIES:
+                            delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+                            logger.warning(f"Rate limited on {model_id}, retry in {delay}s ({attempt+1}/{MAX_RETRIES})")
+                            await asyncio.sleep(delay)
+                            continue
+                        return {"error": True, "error_message": f"Rate limited after {MAX_RETRIES} retries", "token_usage": None}
+
+                    if response.status_code != 200:
+                        return {
+                            "error": True,
+                            "error_message": f"Perplexity API error: {response.status_code} - {response.text}",
+                            "token_usage": None
+                        }
+
+                    data = response.json()
+                    content = data["choices"][0]["message"]["content"]
+
+                    # Extract citations from Perplexity response
+                    citations = data.get("citations", [])
+                    formatted_citations = [{"url": url, "title": url} for url in citations]
+
+                    # Extract token usage (OpenAI-compatible format)
+                    token_usage = None
+                    usage = data.get("usage")
+                    if usage:
+                        token_usage = {
+                            "input": usage.get("prompt_tokens"),
+                            "output": usage.get("completion_tokens")
+                        }
+
                     return {
-                        "error": True,
-                        "error_message": f"Perplexity API error: {response.status_code} - {response.text}"
+                        "content": content,
+                        "citations": formatted_citations,
+                        "error": False,
+                        "token_usage": token_usage
                     }
 
-                data = response.json()
-                content = data["choices"][0]["message"]["content"]
+            except httpx.ReadTimeout:
+                if attempt < MAX_RETRIES:
+                    delay = INITIAL_RETRY_DELAY * (2 ** attempt)
+                    logger.warning(f"Timeout on {model_id}, retry in {delay}s ({attempt+1}/{MAX_RETRIES})")
+                    await asyncio.sleep(delay)
+                    continue
+                return {"error": True, "error_message": "Request timed out after retries", "token_usage": None}
+            except Exception as e:
+                return {"error": True, "error_message": str(e), "token_usage": None}
 
-                # Extract citations from Perplexity response
-                citations = data.get("citations", [])
-
-                # Transform citations to user decision format
-                formatted_citations = [{"url": url, "title": url} for url in citations]
-
-                return {
-                    "content": content,
-                    "citations": formatted_citations,
-                    "error": False
-                }
-
-        except Exception as e:
-            return {"error": True, "error_message": str(e)}
+        return {"error": True, "error_message": "Unexpected retry loop exit", "token_usage": None}
 
     async def get_models(self) -> List[Dict[str, Any]]:
         """Fetch available models from Perplexity with hardcoded fallback.

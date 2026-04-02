@@ -3,6 +3,7 @@ import { getModelVisuals, getShortModelName, buildDisplayNames, getNameVariants,
 import ThinkBlockRenderer from './ThinkBlockRenderer';
 import CopyButton from './CopyButton';
 import StageTimer from './StageTimer';
+import RatingWidget from './RatingWidget';
 import './Stage5.css';
 import './CopyButton.css';
 
@@ -105,7 +106,10 @@ export default function Stage5({
     councilModels = [],
     characterNames = {},
     debateCount = null,
-    isFollowUp = false
+    isFollowUp = false,
+    conversationId = null,
+    messageIndex = null,
+    existingRating = null,
 }) {
     if (!finalResponse) {
         return null;
@@ -270,6 +274,13 @@ export default function Stage5({
                         components={markdownComponents}
                     />
                 </div>
+                {!isFollowUp && conversationId != null && messageIndex != null && (
+                    <RatingWidget
+                        conversationId={conversationId}
+                        messageIndex={messageIndex}
+                        existingRating={existingRating}
+                    />
+                )}
                 <CitationSection citations={finalResponse?.citations} />
             </div>
         </div>

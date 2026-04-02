@@ -32,6 +32,30 @@ def get_preset(name: str) -> Optional[Dict[str, Any]]:
     return presets.get(name)
 
 
+def is_locked(preset_config: Dict[str, Any]) -> bool:
+    """Check if a preset is locked (a role preset)."""
+    return preset_config.get("locked", False)
+
+
+def get_preset_by_role_id(role_id: str) -> Optional[Dict[str, Any]]:
+    """Get a locked preset by its role_id. Returns (name, config) or None."""
+    presets = get_presets()
+    for name, config in presets.items():
+        if config.get("locked") and config.get("role_id") == role_id:
+            return {"name": name, "config": config}
+    return None
+
+
+def get_locked_presets() -> List[Dict[str, Any]]:
+    """Get all locked presets (roles)."""
+    presets = get_presets()
+    return [
+        {"name": name, "config": config}
+        for name, config in presets.items()
+        if config.get("locked")
+    ]
+
+
 def create_preset(name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """Create a new preset. Raises ValueError if exists."""
     presets = get_presets()
@@ -43,19 +67,39 @@ def create_preset(name: str, config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def update_preset(name: str, config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Update existing preset. Returns None if not found."""
+    """Update existing preset. Returns None if not found.
+    Raises PermissionError if preset is locked (use update_locked_preset instead).
+    """
     presets = get_presets()
     if name not in presets:
         return None
+    if presets[name].get("locked"):
+        raise PermissionError(f"Preset '{name}' is locked. Use admin roles API to update.")
     presets[name] = config
     save_presets(presets)
     return {name: config}
 
 
+def update_locked_preset(role_id: str, config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Update a locked preset by role_id (admin only). Preserves locked and role_id fields."""
+    presets = get_presets()
+    for name, existing_config in presets.items():
+        if existing_config.get("locked") and existing_config.get("role_id") == role_id:
+            # Merge: keep locked and role_id, update everything else
+            config["locked"] = True
+            config["role_id"] = role_id
+            presets[name] = config
+            save_presets(presets)
+            return {name: config}
+    return None
+
+
 def delete_preset(name: str) -> bool:
-    """Delete preset. Returns True if deleted."""
+    """Delete preset. Returns True if deleted. Raises PermissionError if locked."""
     presets = get_presets()
     if name in presets:
+        if presets[name].get("locked"):
+            raise PermissionError(f"Preset '{name}' is locked and cannot be deleted.")
         del presets[name]
         save_presets(presets)
         return True

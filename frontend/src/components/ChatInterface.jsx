@@ -10,8 +10,10 @@ import Stage4 from './Stage4';
 import Stage5 from './Stage5';
 import CouncilGrid from './CouncilGrid';
 import ExecutionModeToggle from './ExecutionModeToggle';
+import RoleSelector from './RoleSelector';
 import { api, exportConversation } from '../api';
 import './ChatInterface.css';
+import './RoleSelector.css';
 
 export default function ChatInterface({
     conversation,
@@ -44,6 +46,8 @@ export default function ChatInterface({
     isFollowUpMode = false,
     followUpCount = 0,
     maxFollowUps = 5,
+    selectedRole = null,
+    onSelectRole,
 }) {
     const [input, setInput] = useState('');
     const [webSearch, setWebSearch] = useState(false);
@@ -239,25 +243,53 @@ export default function ChatInterface({
                         </div>
                     </div>
 
-                    {/* Council Preview Grid */}
-                    <div className="welcome-grid-container">
-                        <CouncilGrid
-                            models={councilModels}
-                            chairman={chairmanModel}
-                            status="idle"
-                            characterNames={characterNames}
-                            chairmanCharacterName={chairmanCharacterName}
-                        />
-                    </div>
+                    {/* Role Selector — shown when no role is selected */}
+                    {!selectedRole && (
+                        <RoleSelector onSelectRole={onSelectRole} />
+                    )}
 
-                    {/* Configure Council Button */}
-                    <button className="config-button" onClick={() => onOpenSettings('council')}>CONFIGURE COUNCIL</button>
+                    {/* Council Preview Grid — shown when a role is selected or no role system */}
+                    {selectedRole && (
+                        <div className="welcome-grid-container">
+                            <div className="role-badge" style={{ marginBottom: '0.75rem' }}>
+                                {selectedRole === 'strategy' ? 'Strategy Council' :
+                                 selectedRole === 'content' ? 'Content Council' :
+                                 selectedRole === 'leadership' ? 'Leadership Council' :
+                                 selectedRole}
+                            </div>
+                            <button
+                                className="config-link"
+                                onClick={() => onSelectRole(null)}
+                                style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}
+                            >
+                                Change council
+                            </button>
+                        </div>
+                    )}
+
+                    {!selectedRole && (
+                        <>
+                            {/* Council Preview Grid */}
+                            <div className="welcome-grid-container">
+                                <CouncilGrid
+                                    models={councilModels}
+                                    chairman={chairmanModel}
+                                    status="idle"
+                                    characterNames={characterNames}
+                                    chairmanCharacterName={chairmanCharacterName}
+                                />
+                            </div>
+
+                            {/* Configure Council Button */}
+                            <button className="config-button" onClick={() => onOpenSettings('council')}>CONFIGURE COUNCIL</button>
+                        </>
+                    )}
 
                 </div>
 
                 {/* Input bar for empty state */}
                 <div className="input-area">
-                    {!councilConfigured ? (
+                    {!councilConfigured && !selectedRole ? (
                         <div className="input-container config-required">
                             <span className="config-message">
                                 Council not ready.
@@ -440,19 +472,57 @@ export default function ChatInterface({
                             <p className="hero-subtitle">
                                 The Deliberative Reasoning Engine <button className="config-link" onClick={() => onOpenSettings('council')}>Configure it</button>
                             </p>
-                            <div className="welcome-grid-container">
-                                <CouncilGrid
-                                    models={councilModels}
-                                    chairman={chairmanModel}
-                                    status="idle"
-                                    characterNames={characterNames}
-                                    chairmanCharacterName={chairmanCharacterName}
-                                />
-                            </div>
+
+                            {/* Role Selector — shown when no role selected and no messages */}
+                            {!selectedRole && onSelectRole && (
+                                <RoleSelector onSelectRole={onSelectRole} />
+                            )}
+
+                            {selectedRole && (
+                                <div style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
+                                    <span className="role-badge">
+                                        {selectedRole === 'strategy' ? 'Strategy Council' :
+                                         selectedRole === 'content' ? 'Content Council' :
+                                         selectedRole === 'leadership' ? 'Leadership Council' :
+                                         selectedRole}
+                                    </span>
+                                    <br />
+                                    <button
+                                        className="config-link"
+                                        onClick={() => onSelectRole(null)}
+                                        style={{ fontSize: '0.72rem', marginTop: '0.4rem' }}
+                                    >
+                                        Change council
+                                    </button>
+                                </div>
+                            )}
+
+                            {!selectedRole && (
+                                <div className="welcome-grid-container">
+                                    <CouncilGrid
+                                        models={councilModels}
+                                        chairman={chairmanModel}
+                                        status="idle"
+                                        characterNames={characterNames}
+                                        chairmanCharacterName={chairmanCharacterName}
+                                    />
+                                </div>
+                            )}
                         </div>
                     </div>
                 ) : (
-                    conversation.messages.map((msg, index) => (
+                    <>
+                    {selectedRole && (
+                        <div style={{ display: 'flex', justifyContent: 'center', padding: '0.5rem 0' }}>
+                            <span className="role-badge">
+                                {selectedRole === 'strategy' ? 'Strategy Council' :
+                                 selectedRole === 'content' ? 'Content Council' :
+                                 selectedRole === 'leadership' ? 'Leadership Council' :
+                                 selectedRole}
+                            </span>
+                        </div>
+                    )}
+                    {conversation.messages.map((msg, index) => (
                         <div key={index} className={`message ${msg.role}`}>
                             <div className="message-header">
                                 <div className="message-role">
@@ -674,6 +744,9 @@ export default function ChatInterface({
                                                     run: (msg.stage4?.debates || []).filter(d => d.status === 'completed').length,
                                                     total: msg.stage4.gateway_issues.length
                                                 } : null}
+                                                conversationId={conversation?.id}
+                                                messageIndex={index}
+                                                existingRating={msg.rating || null}
                                             />
                                         )}
 
@@ -691,7 +764,8 @@ export default function ChatInterface({
                                 )}
                             </div>
                         </div>
-                    ))
+                    ))}
+                    </>
                 )}
 
                 {/* Bottom Spacer for floating input */}
@@ -700,10 +774,10 @@ export default function ChatInterface({
 
             {/* Floating Command Capsule */}
             <div className="input-area">
-                {!councilConfigured ? (
+                {!councilConfigured && !selectedRole ? (
                     <div className="input-container config-required">
                         <span className="config-message">
-                            ⚠️ Council not ready.
+                            Council not ready.
                             <button className="config-link" onClick={() => onOpenSettings('llm_keys')}>Configure API Keys</button>
                             <span className="config-separator">or</span>
                             <button className="config-link" onClick={() => onOpenSettings('council')}>Configure Council</button>

@@ -3,7 +3,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Any, Optional, List, Dict
 from pydantic import BaseModel
 from .search import SearchProvider
 
@@ -175,6 +175,12 @@ class Settings(BaseModel):
 
     # Truth Check default preference
     truth_check_default: bool = False  # Enable truth-check by default for new conversations
+
+    # Inter-stage delay in milliseconds (rate-limit cushion between stages)
+    inter_stage_delay_ms: int = 500
+
+    # Admin defaults (Phase 4E) — global defaults applied to all users
+    admin_defaults: Optional[Dict[str, Any]] = None
 
 
 def get_settings() -> Settings:

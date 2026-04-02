@@ -2,10 +2,59 @@ import { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import Settings from './components/Settings';
-import { api } from './api';
+import LoginScreen from './components/LoginScreen';
+import { api, setAuthToken } from './api';
 import './App.css';
 
 function App() {
+  const [authToken, setAuthTokenState] = useState(null);
+  const [userRole, setUserRole] = useState(null);
+  const [userLabel, setUserLabel] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // On mount, check sessionStorage for existing token
+  useEffect(() => {
+    const stored = sessionStorage.getItem('council_token');
+    if (stored) {
+      setAuthToken(stored);
+      api.validate()
+        .then((data) => {
+          setAuthTokenState(stored);
+          setUserRole(data.role);
+          setUserLabel(data.label);
+          setAuthChecked(true);
+        })
+        .catch(() => {
+          sessionStorage.removeItem('council_token');
+          setAuthToken(null);
+          setAuthChecked(true);
+        });
+    } else {
+      setAuthChecked(true);
+    }
+  }, []);
+
+  const handleLogin = (token, role, label) => {
+    sessionStorage.setItem('council_token', token);
+    setAuthToken(token);
+    setAuthTokenState(token);
+    setUserRole(role);
+    setUserLabel(label);
+    setNeedsAuth(false);
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('council_token');
+    setAuthToken(null);
+    setAuthTokenState(null);
+    setUserRole(null);
+    setUserLabel(null);
+  };
+
+  // Show login screen if auth is required and no valid token
+  // needsAuth: true if the server returned 401 on first API call (auth is enabled)
+  const [needsAuth, setNeedsAuth] = useState(false);
+
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
@@ -31,6 +80,7 @@ function App() {
   const [toastMessage, setToastMessage] = useState(null);
   const [toastType, setToastType] = useState('success');
   const [presets, setPresets] = useState([]);
+  const [selectedRole, setSelectedRole] = useState(null);
   const [dictationLanguage, setDictationLanguage] = useState('auto');
   const [settingsKey, setSettingsKey] = useState(0); // Force Settings remount
   const abortControllerRef = useRef(null);
@@ -53,11 +103,11 @@ function App() {
     return enriched;
   };
 
-  // Check initial configuration on mount
+  // Check initial configuration on mount and after login
   useEffect(() => {
     checkInitialSetup();
     loadPresets();
-  }, []);
+  }, [authToken]);
 
   // Toast helper function
   const showToast = (message, type = 'success') => {
@@ -132,6 +182,21 @@ function App() {
       }
 
     } catch (error) {
+      // If the server returns 401, auth is required
+      if (error.message && error.message.includes('Failed to get settings')) {
+        // Try a direct fetch to check for 401
+        try {
+          const resp = await fetch(
+            `${import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8001`}/api/settings`
+          );
+          if (resp.status === 401) {
+            setNeedsAuth(true);
+            return;
+          }
+        } catch (_) {
+          // Network error, not auth related
+        }
+      }
       console.error('Failed to check initial setup:', error);
     }
   };
@@ -346,6 +411,7 @@ function App() {
     // Conversation will be created lazily on first message
     setCurrentConversationId(null);
     setCurrentConversation(null);
+    setSelectedRole(null);
   };
 
   const handleClearCouncilConfig = async () => {
@@ -587,7 +653,7 @@ function App() {
       // Send message with streaming
       await api.sendMessageStream(
         conversationId,
-        { content, webSearch, executionMode, truthCheck: truthCheckEnabled, debateEnabled: debateEnabled_arg },
+        { content, webSearch, executionMode, truthCheck: truthCheckEnabled, debateEnabled: debateEnabled_arg, roleId: selectedRole },
         (eventType, event) => {
           switch (eventType) {
             case 'search_start':
@@ -1427,6 +1493,19 @@ function App() {
     }
   };
 
+  // If auth check hasn't completed, show nothing (avoids flash)
+  if (!authChecked) {
+    return null;
+  }
+
+  // If we have no token and the server requires auth, show login.
+  // We detect this by checking if authToken is null AND we got a 401 on checkInitialSetup.
+  // For simplicity: if no token is stored, try rendering the app normally.
+  // The checkInitialSetup will fail with 401 if auth is required, triggering login.
+  if (!authToken && authChecked && needsAuth) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
     <div className="app">
       <Sidebar
@@ -1470,6 +1549,8 @@ function App() {
         isFollowUpMode={isFollowUpMode}
         followUpCount={followUpCount}
         maxFollowUps={MAX_FOLLOW_UPS}
+        selectedRole={selectedRole}
+        onSelectRole={setSelectedRole}
       />
       {showSettings && (
         <Settings
